@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ChaufferieLog" />
+  <meta name="theme-color" content="#0f1923" />
+  <title>ChaufferieLog</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="splash-inner">
+    <div class="splash-icon">🔥</div>
+    <div class="splash-title">CHAUFFERIE<span>LOG</span></div>
+    <div class="splash-sub">Inventaire Technique</div>
+    <div class="splash-loader"><div class="splash-bar"></div></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+
+  <!-- HEADER -->
+  <header>
+    <div class="header-left">
+      <span class="header-icon">🔥</span>
+      <div>
+        <div class="header-title">CHAUFFERIE<span>LOG</span></div>
+        <div class="header-sub" id="header-count">0 équipement(s)</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn" id="btn-network-status" title="Statut réseau">
+        <span id="network-icon">📡</span>
+      </button>
+      <button class="icon-btn" id="btn-export" title="Exporter">⬇️</button>
+    </div>
+  </header>
+
+  <!-- TABS -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="list">📋 Liste</button>
+    <button class="tab" data-tab="scan">📷 Scanner</button>
+    <button class="tab" data-tab="settings">⚙️ Config</button>
+  </nav>
+
+  <!-- TAB: LISTE -->
+  <section id="tab-list" class="tab-content active">
+    <div class="list-toolbar">
+      <input type="text" id="search-input" placeholder="🔍 Rechercher..." />
+      <select id="filter-cat">
+        <option value="">Toutes catégories</option>
+      </select>
+    </div>
+    <div id="equipment-list"></div>
+    <button class="fab" id="btn-add-manual">＋</button>
+  </section>
+
+  <!-- TAB: SCAN -->
+  <section id="tab-scan" class="tab-content">
+    <div class="scan-zone">
+      <div class="scan-header">
+        <h2>Scanner une plaque</h2>
+        <p>Prenez en photo la plaque signalétique d'un équipement</p>
+      </div>
+
+      <div class="camera-container" id="camera-container">
+        <video id="camera-preview" autoplay playsinline></video>
+        <canvas id="camera-canvas"></canvas>
+        <div class="camera-overlay">
+          <div class="scan-frame">
+            <div class="corner tl"></div><div class="corner tr"></div>
+            <div class="corner bl"></div><div class="corner br"></div>
+          </div>
+          <p class="scan-hint">Centrez la plaque dans le cadre</p>
+        </div>
+        <div class="camera-placeholder" id="camera-placeholder">
+          <span>📷</span>
+          <p>Caméra non démarrée</p>
+        </div>
+      </div>
+
+      <div class="scan-actions">
+        <button class="btn-primary" id="btn-start-camera">🎥 Démarrer caméra</button>
+        <button class="btn-capture hidden" id="btn-capture">📸 Capturer</button>
+        <button class="btn-secondary" id="btn-upload-photo">🖼️ Importer photo</button>
+        <input type="file" id="file-input" accept="image/*" capture="environment" class="hidden" />
+      </div>
+
+      <!-- OCR STATUS -->
+      <div id="ocr-status" class="ocr-status hidden">
+        <div class="ocr-spinner"></div>
+        <span id="ocr-status-text">Analyse en cours...</span>
+      </div>
+
+      <!-- PREVIEW IMAGE -->
+      <div id="image-preview-container" class="hidden">
+        <img id="image-preview" alt="Aperçu" />
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: SETTINGS -->
+  <section id="tab-settings" class="tab-content">
+    <div class="settings-container">
+      <h2>Configuration</h2>
+
+      <div class="settings-card">
+        <h3>🤖 API Gemini (OCR amélioré)</h3>
+        <p class="settings-desc">Optionnel — améliore la reconnaissance si réseau disponible.</p>
+        <p class="settings-desc">Clé gratuite sur <strong>aistudio.google.com</strong></p>
+        <input type="password" id="gemini-key-input" placeholder="Coller votre clé API Gemini..." />
+        <button class="btn-primary" id="btn-save-gemini">💾 Sauvegarder</button>
+        <div id="gemini-status" class="settings-status"></div>
+      </div>
+
+      <div class="settings-card">
+        <h3>🗂️ Catégories personnalisées</h3>
+        <div id="categories-list"></div>
+        <div class="add-cat-row">
+          <input type="text" id="new-cat-input" placeholder="Nouvelle catégorie..." />
+          <button class="btn-primary" id="btn-add-cat">＋</button>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3>📊 Statistiques</h3>
+        <div id="stats-container"></div>
+      </div>
+
+      <div class="settings-card danger-zone">
+        <h3>⚠️ Zone dangereuse</h3>
+        <button class="btn-danger" id="btn-clear-all">🗑️ Effacer toutes les données</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- MODAL: FICHE ÉQUIPEMENT -->
+<div id="modal-equipment" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="modal-title">Nouvel équipement</h2>
+      <button class="modal-close" id="btn-modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Catégorie *</label>
+        <select id="field-category"></select>
+      </div>
+      <div class="form-group">
+        <label>Désignation *</label>
+        <input type="text" id="field-name" placeholder="Ex: Chaudière principale" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Marque</label>
+          <input type="text" id="field-brand" placeholder="Ex: Viessmann" />
+        </div>
+        <div class="form-group">
+          <label>Modèle</label>
+          <input type="text" id="field-model" placeholder="Ex: Vitocal 300" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>N° de série</label>
+          <input type="text" id="field-serial" placeholder="SN..." />
+        </div>
+        <div class="form-group">
+          <label>Année</label>
+          <input type="number" id="field-year" placeholder="2020" min="1950" max="2099" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Puissance (kW)</label>
+          <input type="text" id="field-power" placeholder="Ex: 45 kW" />
+        </div>
+        <div class="form-group">
+          <label>Fluide / Énergie</label>
+          <input type="text" id="field-fluid" placeholder="Ex: Gaz naturel" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Localisation</label>
+        <input type="text" id="field-location" placeholder="Ex: Sous-sol niveau -1" />
+      </div>
+      <div class="form-group">
+        <label>Notes / Observations</label>
+        <textarea id="field-notes" placeholder="Informations complémentaires..."></textarea>
+      </div>
+
+      <!-- IMAGE ATTACHÉE -->
+      <div class="form-group">
+        <label>Photo de la plaque</label>
+        <div id="field-photo-container">
+          <img id="field-photo-preview" class="hidden" alt="Photo plaque" />
+          <button class="btn-secondary btn-sm" id="btn-attach-photo">📷 Attacher photo</button>
+          <input type="file" id="attach-file-input" accept="image/*" capture="environment" class="hidden" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>OCR brut (texte extrait)</label>
+        <textarea id="field-ocr-raw" placeholder="Texte brut extrait de la plaque..." rows="3"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="btn-modal-cancel">Annuler</button>
+      <button class="btn-primary" id="btn-modal-save">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
