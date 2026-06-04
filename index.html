@@ -1,233 +1,354 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="ChaufferieLog" />
-  <meta name="theme-color" content="#0f1923" />
-  <title>ChaufferieLog</title>
-  <link rel="manifest" href="manifest.json" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="ADIATOOL"/>
+  <meta name="theme-color" content="#0d1b2a"/>
+  <title>ADIATOOL</title>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icons/icon-192.png"/>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet"/>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
 
-<!-- SPLASH -->
 <div id="splash">
   <div class="splash-inner">
-    <div class="splash-icon">🔥</div>
-    <div class="splash-title">CHAUFFERIE<span>LOG</span></div>
-    <div class="splash-sub">Inventaire Technique</div>
+    <img id="splash-logo" src="" alt="ADIA"/>
+    <div class="splash-title">ADIA<span>TOOL</span></div>
+    <div class="splash-sub">Outil de visite technique</div>
     <div class="splash-loader"><div class="splash-bar"></div></div>
   </div>
 </div>
 
-<!-- APP -->
 <div id="app" class="hidden">
 
-  <!-- HEADER -->
   <header>
     <div class="header-left">
-      <span class="header-icon">🔥</span>
+      <button class="icon-btn back-btn hidden" id="btn-back">‹</button>
+      <img id="header-logo" src="" alt="ADIA" class="header-logo-img"/>
       <div>
-        <div class="header-title">CHAUFFERIE<span>LOG</span></div>
-        <div class="header-sub" id="header-count">0 équipement(s)</div>
+        <div class="header-title" id="header-title">ADIA<span>TOOL</span></div>
+        <div class="header-sub" id="header-sub">Tableau de bord</div>
       </div>
     </div>
     <div class="header-right">
-      <button class="icon-btn" id="btn-network-status" title="Statut réseau">
-        <span id="network-icon">📡</span>
-      </button>
-      <button class="icon-btn" id="btn-export" title="Exporter">⬇️</button>
+      <span class="net-dot" id="net-dot"></span>
+      <button class="icon-btn" id="btn-header-export" style="display:none">⬇️</button>
+      <button class="icon-btn" id="btn-settings-nav">⚙️</button>
     </div>
   </header>
 
-  <!-- TABS -->
-  <nav class="tabs">
-    <button class="tab active" data-tab="list">📋 Liste</button>
-    <button class="tab" data-tab="scan">📷 Scanner</button>
-    <button class="tab" data-tab="settings">⚙️ Config</button>
-  </nav>
-
-  <!-- TAB: LISTE -->
-  <section id="tab-list" class="tab-content active">
-    <div class="list-toolbar">
-      <input type="text" id="search-input" placeholder="🔍 Rechercher..." />
-      <select id="filter-cat">
-        <option value="">Toutes catégories</option>
-      </select>
+  <!-- DASHBOARD -->
+  <div id="view-dashboard" class="view active">
+    <nav class="tabs">
+      <button class="tab active" data-dtab="sites">🏢 Sites</button>
+      <button class="tab" data-dtab="missions">📋 Missions</button>
+    </nav>
+    <div id="dtab-sites" class="tab-content active">
+      <div class="list-toolbar"><input type="text" id="site-search" placeholder="🔍 Rechercher un site..."/></div>
+      <div id="sites-list" class="card-list"></div>
+      <button class="fab" id="btn-add-site">＋</button>
     </div>
-    <div id="equipment-list"></div>
-    <button class="fab" id="btn-add-manual">＋</button>
-  </section>
-
-  <!-- TAB: SCAN -->
-  <section id="tab-scan" class="tab-content">
-    <div class="scan-zone">
-      <div class="scan-header">
-        <h2>Scanner une plaque</h2>
-        <p>Prenez en photo la plaque signalétique d'un équipement</p>
+    <div id="dtab-missions" class="tab-content">
+      <div class="list-toolbar">
+        <input type="text" id="mission-search-all" placeholder="🔍 Mission, site..."/>
+        <select id="mission-filter-status">
+          <option value="">Tous statuts</option>
+          <option value="en_cours">En cours</option>
+          <option value="termine">Terminée</option>
+          <option value="planifie">Planifiée</option>
+        </select>
       </div>
+      <div id="all-missions-list" class="card-list"></div>
+    </div>
+  </div>
 
-      <div class="camera-container" id="camera-container">
-        <video id="camera-preview" autoplay playsinline></video>
-        <canvas id="camera-canvas"></canvas>
-        <div class="camera-overlay">
-          <div class="scan-frame">
-            <div class="corner tl"></div><div class="corner tr"></div>
-            <div class="corner bl"></div><div class="corner br"></div>
+  <!-- SITE -->
+  <div id="view-site" class="view">
+    <nav class="tabs">
+      <button class="tab active" data-stab="missions">📋 Missions</button>
+      <button class="tab" data-stab="info">🏢 Infos</button>
+    </nav>
+    <div id="stab-missions" class="tab-content active">
+      <div id="site-missions-list" class="card-list" style="padding-bottom:80px"></div>
+      <button class="fab" id="btn-add-mission">＋</button>
+    </div>
+    <div id="stab-info" class="tab-content">
+      <div id="site-info-panel" class="info-panel"></div>
+    </div>
+  </div>
+
+  <!-- MISSION -->
+  <div id="view-mission" class="view">
+    <nav class="tabs" id="mission-tabs-nav">
+      <button class="tab active" data-mtab="equipments">🔧 Matériels</button>
+      <button class="tab" data-mtab="scan">📷 Scan</button>
+      <button class="tab" data-mtab="forms">📝 Relevés</button>
+      <button class="tab" data-mtab="notes">✏️ Notes</button>
+      <button class="tab" data-mtab="photos">🖼️ Photos</button>
+      <button class="tab" data-mtab="report">📄 Rapport</button>
+    </nav>
+
+    <!-- MATÉRIELS -->
+    <div id="mtab-equipments" class="tab-content active">
+      <div class="list-toolbar">
+        <input type="text" id="eq-search" placeholder="🔍 Rechercher..."/>
+        <select id="eq-filter-cat"><option value="">Toutes</option></select>
+      </div>
+      <div id="mission-eq-list" class="card-list" style="padding-bottom:80px"></div>
+      <button class="fab" id="btn-add-eq">＋</button>
+    </div>
+
+    <!-- SCAN -->
+    <div id="mtab-scan" class="tab-content">
+      <div class="scan-zone">
+        <div class="scan-header"><h2>Scanner une plaque</h2><p>Photographiez la plaque signalétique</p></div>
+        <div class="camera-container">
+          <video id="camera-preview" autoplay playsinline></video>
+          <canvas id="camera-canvas"></canvas>
+          <div class="camera-overlay">
+            <div class="scan-frame"><div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div></div>
+            <p class="scan-hint">Centrez la plaque dans le cadre</p>
           </div>
-          <p class="scan-hint">Centrez la plaque dans le cadre</p>
+          <div class="camera-placeholder" id="camera-placeholder"><span>📷</span><p>Caméra non démarrée</p></div>
         </div>
-        <div class="camera-placeholder" id="camera-placeholder">
-          <span>📷</span>
-          <p>Caméra non démarrée</p>
+        <div class="scan-actions">
+          <button class="btn-primary" id="btn-start-camera">🎥 Démarrer caméra</button>
+          <button class="btn-capture hidden" id="btn-capture">📸 Capturer</button>
+          <button class="btn-secondary" id="btn-upload-photo">🖼️ Importer photo</button>
+          <input type="file" id="file-input" accept="image/*" capture="environment" class="hidden"/>
         </div>
-      </div>
-
-      <div class="scan-actions">
-        <button class="btn-primary" id="btn-start-camera">🎥 Démarrer caméra</button>
-        <button class="btn-capture hidden" id="btn-capture">📸 Capturer</button>
-        <button class="btn-secondary" id="btn-upload-photo">🖼️ Importer photo</button>
-        <input type="file" id="file-input" accept="image/*" capture="environment" class="hidden" />
-      </div>
-
-      <!-- OCR STATUS -->
-      <div id="ocr-status" class="ocr-status hidden">
-        <div class="ocr-spinner"></div>
-        <span id="ocr-status-text">Analyse en cours...</span>
-      </div>
-
-      <!-- PREVIEW IMAGE -->
-      <div id="image-preview-container" class="hidden">
-        <img id="image-preview" alt="Aperçu" />
+        <div id="ocr-status" class="ocr-status hidden"><div class="ocr-spinner"></div><span id="ocr-status-text">Analyse...</span></div>
+        <div id="image-preview-container" class="hidden"><img id="image-preview" alt=""/></div>
       </div>
     </div>
-  </section>
 
-  <!-- TAB: SETTINGS -->
-  <section id="tab-settings" class="tab-content">
+    <!-- RELEVÉS -->
+    <div id="mtab-forms" class="tab-content">
+      <div class="forms-zone" id="forms-zone">
+        <div class="modules-selector" id="modules-selector"></div>
+        <div id="active-forms-container"></div>
+      </div>
+    </div>
+
+    <!-- NOTES -->
+    <div id="mtab-notes" class="tab-content">
+      <div class="notes-zone">
+        <div class="notes-toolbar">
+          <span class="notes-title">✏️ Notes de visite</span>
+          <span class="notes-saved" id="notes-saved"></span>
+        </div>
+        <textarea id="notes-textarea" placeholder="Saisissez vos notes librement...&#10;&#10;Observations générales, points d'attention, éléments à vérifier, suites à donner..."></textarea>
+      </div>
+    </div>
+
+    <!-- PHOTOS -->
+    <div id="mtab-photos" class="tab-content">
+      <div class="photos-zone">
+        <div class="photos-toolbar">
+          <span class="photos-title">🖼️ Reportage photographique</span>
+          <div class="photos-actions">
+            <button class="btn-sm btn-secondary" id="btn-add-photo-row">＋ Ajouter</button>
+          </div>
+        </div>
+        <div class="photo-table-header">
+          <div class="photo-col-header">PHOTOS</div>
+          <div class="photo-col-header">COMMENTAIRES</div>
+        </div>
+        <div id="photo-rows-container"></div>
+        <div id="photo-empty" class="empty-state" style="display:none">
+          <div class="empty-icon">🖼️</div>
+          <p>Aucune photo.<br>Appuyez sur "+ Ajouter" pour commencer.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- RAPPORT -->
+    <div id="mtab-report" class="tab-content">
+      <div class="report-zone">
+        <div class="report-header-block"><h2>Rapport de visite</h2><p>Exports disponibles pour cette mission</p></div>
+        <div class="settings-card">
+          <h3>📝 Observations générales</h3>
+          <textarea id="report-obs" placeholder="Observations sur l'installation..." rows="4"></textarea>
+        </div>
+        <div class="settings-card">
+          <h3>✅ Conclusion</h3>
+          <select id="report-conclusion">
+            <option value="">Sélectionner...</option>
+            <option value="conforme">Installation conforme</option>
+            <option value="reserves">Conforme avec réserves</option>
+            <option value="non_conforme">Non conforme</option>
+            <option value="a_completer">À compléter</option>
+          </select>
+        </div>
+        <div class="settings-card">
+          <h3>📦 Contenu du rapport PDF</h3>
+          <label class="check-row"><input type="checkbox" id="rpt-equipments" checked/> Liste des équipements</label>
+          <label class="check-row"><input type="checkbox" id="rpt-forms" checked/> Formulaires de relevés</label>
+          <label class="check-row"><input type="checkbox" id="rpt-notes" checked/> Notes de visite</label>
+          <label class="check-row"><input type="checkbox" id="rpt-photos" checked/> Reportage photographique</label>
+        </div>
+        <div class="report-actions">
+          <button class="btn-primary" id="btn-export-pdf">📄 Exporter PDF</button>
+          <button class="btn-primary" id="btn-export-excel" style="background:var(--success)">📊 Exporter Excel</button>
+          <button class="btn-secondary" id="btn-export-csv">📋 Exporter CSV équipements</button>
+        </div>
+        <div class="tip-box">L'export Excel génère un classeur avec un onglet par module de relevé + équipements + photos + notes.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div id="view-settings" class="view">
     <div class="settings-container">
-      <h2>Configuration</h2>
-
       <div class="settings-card">
         <h3>🤖 API Gemini (OCR amélioré)</h3>
-        <p class="settings-desc">Optionnel — améliore la reconnaissance si réseau disponible.</p>
         <p class="settings-desc">Clé gratuite sur <strong>aistudio.google.com</strong></p>
-        <input type="password" id="gemini-key-input" placeholder="Coller votre clé API Gemini..." />
+        <input type="password" id="gemini-key-input" placeholder="Clé API Gemini..."/>
         <button class="btn-primary" id="btn-save-gemini">💾 Sauvegarder</button>
         <div id="gemini-status" class="settings-status"></div>
       </div>
-
       <div class="settings-card">
-        <h3>🗂️ Catégories personnalisées</h3>
+        <h3>🗂️ Catégories d'équipements</h3>
         <div id="categories-list"></div>
         <div class="add-cat-row">
-          <input type="text" id="new-cat-input" placeholder="Nouvelle catégorie..." />
+          <input type="text" id="new-cat-input" placeholder="Nouvelle catégorie..."/>
           <button class="btn-primary" id="btn-add-cat">＋</button>
         </div>
       </div>
-
       <div class="settings-card">
         <h3>📊 Statistiques</h3>
         <div id="stats-container"></div>
       </div>
-
+      <div class="settings-card">
+        <h3>💾 Sauvegarde</h3>
+        <button class="btn-secondary" id="btn-backup">⬇️ Télécharger sauvegarde</button>
+        <button class="btn-secondary" id="btn-restore-btn">⬆️ Restaurer sauvegarde</button>
+        <input type="file" id="restore-input" accept=".json" class="hidden"/>
+      </div>
       <div class="settings-card danger-zone">
         <h3>⚠️ Zone dangereuse</h3>
         <button class="btn-danger" id="btn-clear-all">🗑️ Effacer toutes les données</button>
       </div>
     </div>
-  </section>
+  </div>
 
-</div>
+</div><!-- #app -->
 
-<!-- MODAL: FICHE ÉQUIPEMENT -->
-<div id="modal-equipment" class="modal hidden">
+<!-- MODAL SITE -->
+<div id="modal-site" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-content">
-    <div class="modal-header">
-      <h2 id="modal-title">Nouvel équipement</h2>
-      <button class="modal-close" id="btn-modal-close">✕</button>
-    </div>
+    <div class="modal-header"><h2 id="modal-site-title">Nouveau site</h2><button class="modal-close" data-modal="modal-site">✕</button></div>
     <div class="modal-body">
-      <div class="form-group">
-        <label>Catégorie *</label>
-        <select id="field-category"></select>
+      <div class="form-group"><label>Nom *</label><input type="text" id="site-name" placeholder="Résidence Les Acacias"/></div>
+      <div class="form-group"><label>Adresse</label><input type="text" id="site-address"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Code postal</label><input type="text" id="site-zip"/></div>
+        <div class="form-group"><label>Ville</label><input type="text" id="site-city"/></div>
       </div>
-      <div class="form-group">
-        <label>Désignation *</label>
-        <input type="text" id="field-name" placeholder="Ex: Chaudière principale" />
+      <div class="form-group"><label>Type de construction</label>
+        <select id="site-construction"><option value="classique">Classique</option><option value="haussmannien">Haussmannien</option><option value="recent">Récent</option><option value="industriel">Industriel</option><option value="autre">Autre</option></select>
       </div>
       <div class="form-row">
-        <div class="form-group">
-          <label>Marque</label>
-          <input type="text" id="field-brand" placeholder="Ex: Viessmann" />
-        </div>
-        <div class="form-group">
-          <label>Modèle</label>
-          <input type="text" id="field-model" placeholder="Ex: Vitocal 300" />
-        </div>
+        <div class="form-group"><label>Nb bâtiments</label><input type="number" id="site-batiments" min="1"/></div>
+        <div class="form-group"><label>Nb niveaux</label><input type="number" id="site-niveaux"/></div>
       </div>
       <div class="form-row">
-        <div class="form-group">
-          <label>N° de série</label>
-          <input type="text" id="field-serial" placeholder="SN..." />
-        </div>
-        <div class="form-group">
-          <label>Année</label>
-          <input type="number" id="field-year" placeholder="2020" min="1950" max="2099" />
-        </div>
+        <div class="form-group"><label>Nb logements</label><input type="number" id="site-logements"/></div>
+        <div class="form-group"><label>Hauteur statique (m)</label><input type="number" id="site-hauteur"/></div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Puissance (kW)</label>
-          <input type="text" id="field-power" placeholder="Ex: 45 kW" />
-        </div>
-        <div class="form-group">
-          <label>Fluide / Énergie</label>
-          <input type="text" id="field-fluid" placeholder="Ex: Gaz naturel" />
-        </div>
+      <div class="form-group"><label>Emplacement chaufferie</label><input type="text" id="site-emplacement" placeholder="Sous-sol -1"/></div>
+      <div class="form-group"><label>Énergie principale</label>
+        <select id="site-energie"><option value="Gaz naturel">Gaz naturel</option><option value="Fioul">Fioul</option><option value="CPCU / Réseau chaleur">CPCU / Réseau chaleur</option><option value="Pompe à chaleur">Pompe à chaleur</option><option value="Électrique">Électrique</option><option value="Autre">Autre</option></select>
       </div>
-      <div class="form-group">
-        <label>Localisation</label>
-        <input type="text" id="field-location" placeholder="Ex: Sous-sol niveau -1" />
-      </div>
-      <div class="form-group">
-        <label>Notes / Observations</label>
-        <textarea id="field-notes" placeholder="Informations complémentaires..."></textarea>
-      </div>
-
-      <!-- IMAGE ATTACHÉE -->
-      <div class="form-group">
-        <label>Photo de la plaque</label>
-        <div id="field-photo-container">
-          <img id="field-photo-preview" class="hidden" alt="Photo plaque" />
-          <button class="btn-secondary btn-sm" id="btn-attach-photo">📷 Attacher photo</button>
-          <input type="file" id="attach-file-input" accept="image/*" capture="environment" class="hidden" />
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label>OCR brut (texte extrait)</label>
-        <textarea id="field-ocr-raw" placeholder="Texte brut extrait de la plaque..." rows="3"></textarea>
-      </div>
+      <div class="form-group"><label>Contact / Gestionnaire</label><input type="text" id="site-contact"/></div>
+      <div class="form-group"><label>Notes</label><textarea id="site-notes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
-      <button class="btn-secondary" id="btn-modal-cancel">Annuler</button>
-      <button class="btn-primary" id="btn-modal-save">💾 Enregistrer</button>
+      <button class="btn-secondary" data-modal="modal-site">Annuler</button>
+      <button class="btn-primary" id="btn-save-site">💾 Enregistrer</button>
     </div>
   </div>
 </div>
 
-<!-- TOAST -->
+<!-- MODAL MISSION -->
+<div id="modal-mission" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content">
+    <div class="modal-header"><h2 id="modal-mission-title">Nouvelle mission</h2><button class="modal-close" data-modal="modal-mission">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>Intitulé *</label><input type="text" id="mission-name"/></div>
+      <div class="form-group"><label>Type</label>
+        <select id="mission-type"><option value="audit">Audit / Diagnostic</option><option value="inventaire">Inventaire initial</option><option value="controle">Contrôle récurrent</option><option value="maintenance">Visite de maintenance</option><option value="expertise">Expertise</option><option value="autre">Autre</option></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Date début</label><input type="date" id="mission-date-start"/></div>
+        <div class="form-group"><label>Date fin</label><input type="date" id="mission-date-end"/></div>
+      </div>
+      <div class="form-group"><label>Intervenant</label><input type="text" id="mission-operator"/></div>
+      <div class="form-group"><label>Statut</label>
+        <select id="mission-status"><option value="planifie">Planifiée</option><option value="en_cours">En cours</option><option value="termine">Terminée</option></select>
+      </div>
+      <div class="form-group"><label>Référence / N° contrat</label><input type="text" id="mission-ref"/></div>
+      <div class="form-group"><label>Notes</label><textarea id="mission-notes" rows="2"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" data-modal="modal-mission">Annuler</button>
+      <button class="btn-primary" id="btn-save-mission">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EQUIPMENT -->
+<div id="modal-equipment" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-content">
+    <div class="modal-header"><h2 id="modal-eq-title">Nouvel équipement</h2><button class="modal-close" data-modal="modal-equipment">✕</button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>Catégorie *</label><select id="field-category"></select></div>
+      <div class="form-group"><label>Désignation *</label><input type="text" id="field-name"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Marque</label><input type="text" id="field-brand"/></div>
+        <div class="form-group"><label>Modèle</label><input type="text" id="field-model"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>N° de série</label><input type="text" id="field-serial"/></div>
+        <div class="form-group"><label>Année</label><input type="number" id="field-year" min="1950" max="2099"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Puissance (kW)</label><input type="text" id="field-power"/></div>
+        <div class="form-group"><label>Fluide / Énergie</label><input type="text" id="field-fluid"/></div>
+      </div>
+      <div class="form-group"><label>Localisation</label><input type="text" id="field-location"/></div>
+      <div class="form-group"><label>État général</label>
+        <select id="field-condition"><option value="">Non renseigné</option><option value="bon">Bon état</option><option value="correct">Correct</option><option value="degrade">Dégradé</option><option value="hs">Hors service</option></select>
+      </div>
+      <div class="form-group"><label>Observations</label><textarea id="field-notes" rows="3"></textarea></div>
+      <div class="form-group">
+        <label>Photo de la plaque</label>
+        <img id="field-photo-preview" class="hidden" style="width:100%;border-radius:8px;margin-bottom:6px;max-height:150px;object-fit:cover" alt=""/>
+        <button class="btn-secondary btn-sm" id="btn-attach-photo">📷 Attacher photo</button>
+        <input type="file" id="attach-file-input" accept="image/*" capture="environment" class="hidden"/>
+      </div>
+      <div class="form-group"><label>Texte OCR brut</label><textarea id="field-ocr-raw" rows="2"></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" data-modal="modal-equipment">Annuler</button>
+      <button class="btn-primary" id="btn-save-equipment">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden"></div>
 
+<script src="logo.js"></script>
+<script src="forms-data.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
