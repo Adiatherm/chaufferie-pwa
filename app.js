@@ -37,7 +37,7 @@ const DEFAULT_CATEGORIES=[
   {id:'electrique',name:'Équipement élec.',color:'#eab308'},{id:'autre',name:'Autre',color:'#6b7280'},
 ];
 const SL={en_cours:'En cours',termine:'Terminée',planifie:'Planifiée'};
-const TL={audit:'Mission d\'audit',intervention:'Intervention ponctuelle',etude_moe:'Étude & MOE',controle:'Contrôle d\'exploitation',incident:'Rapport d\'incident'};
+const TL={audit:"Mission d'audit",intervention:'Intervention ponctuelle',etude_moe:"Mission d'étude & MOE",controle:"Contrôle d'exploitation",incident:"Rapport d'incident"};
 const CL={bon:'Bon état',correct:'Correct',degrade:'Dégradé',hs:'Hors service'};
 
 // ── INIT ──────────────────────────────────────────────────────────
@@ -257,7 +257,13 @@ function getMFD(){return formDataStore.find(f=>f.id===currentMissionId)||{id:cur
 async function saveMFD(fd){await dbPut('formdata',fd);const idx=formDataStore.findIndex(f=>f.id===currentMissionId);if(idx>=0)formDataStore[idx]=fd;else formDataStore.push(fd);}
 
 function renderFormsZone(){
-  const fd=getMFD();const container=document.getElementById('active-forms-container');container.innerHTML='';
+  const mission=missions.find(x=>x.id===currentMissionId);
+  const nbLocaux=mission?.nbLocaux||1;
+  const fd=getMFD();
+  const container=document.getElementById('active-forms-container');
+  container.innerHTML='';
+
+  // ── MODULE TOGGLES ─────────────────────────────────────────
   const sel=document.getElementById('modules-selector');
   sel.innerHTML='<h3>Modules à relever pour cette mission</h3><div class="module-toggles" id="module-toggles"></div>';
   const grid=document.getElementById('module-toggles');
@@ -273,25 +279,56 @@ function renderFormsZone(){
     });
     grid.appendChild(btn);
   });
+
+  // ── MULTI-LOCAUX ───────────────────────────────────────────
+  if(nbLocaux<=1){
+    // Single local — render directly
+    fd.activeModules.forEach(modId=>{
+
   fd.activeModules.forEach(modId=>{
     const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
-    if(mod.multiYear)renderCahierBlock(mod,fd,container);
-    else if(mod.repeatable)renderRepeatableBlock(mod,fd,container);
-    else renderFormBlock(mod,fd,container);
-  });
+      if(mod.multiYear)renderCahierBlock(mod,fd,container);
+      else if(mod.repeatable)renderRepeatableBlock(mod,fd,container);
+      else renderFormBlock(mod,fd,container);
+    });
+  } else {
+    // Multiple locaux — tab per local
+    const activeLocal=fd.localTabs?.activeLocal||0;
+    // Tab bar
+    const tabBar=document.createElement('div');tabBar.className='local-tab-bar';
+    for(let i=0;i<nbLocaux;i++){
+      const t=document.createElement('button');t.className='local-tab'+(i===activeLocal?' active':'');
+      t.textContent=nbLocaux===1?'Local technique':`Local ${i+1}`;
+      t.addEventListener('click',async()=>{const fdd=getMFD();if(!fdd.localTabs)fdd.localTabs={};fdd.localTabs.activeLocal=i;await saveMFD(fdd);renderFormsZone();});
+      tabBar.appendChild(t);
+    }
+    container.appendChild(tabBar);
+    // Build a local-scoped fd proxy
+    const localKey=`local_${activeLocal}`;
+    const localData=(fd.localData||{})[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
+    const localFd={id:fd.id,activeModules:fd.activeModules,data:localData.data||{},repeatData:localData.repeatData||{},comments:localData.comments||{},cahierYears:localData.cahierYears||{}};
+    const localSave=async(fdd)=>{const mainFdd=getMFD();if(!mainFdd.localData)mainFdd.localData={};mainFdd.localData[localKey]={data:fdd.data,repeatData:fdd.repeatData,comments:fdd.comments||{},cahierYears:fdd.cahierYears||{}};await saveMFD(mainFdd);};
+    // Render modules for this local
+    fd.activeModules.forEach(modId=>{
+      const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
+      if(mod.multiYear)renderCahierBlock(mod,localFd,container,localSave);
+      else if(mod.repeatable)renderRepeatableBlock(mod,localFd,container,localSave);
+      else renderFormBlock(mod,localFd,container,localSave);
+    });
+  }
 }
 
-function renderFormBlock(mod,fd,container){
+function renderFormBlock(mod,fd,container,saveFn=null){
   const block=document.createElement('div');block.className='form-block';
   block.innerHTML=`<div class="form-block-header"><div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div></div><div class="form-block-body" id="fb-${mod.id}"></div>`;
   container.appendChild(block);
   const body=document.getElementById('fb-'+mod.id);const data=fd.data[mod.id]||{};
   const allFields=mod.sections?mod.sections.flatMap(s=>[{type:'section',label:s.title},...s.fields]):mod.fields||[];
-  allFields.forEach(f=>renderField(f,data,body,mod,fd));
-  if(mod.notes_field)renderField(mod.notes_field,data,body,mod,fd);
+  allFields.forEach(f=>renderField(f,data,body,mod,fd,null,saveFn));
+  if(mod.notes_field)renderField(mod.notes_field,data,body,mod,fd,null,saveFn);
 }
 
-function renderField(field,data,body,mod,fd,iIdx=null){
+function renderField(field,data,body,mod,fd,iIdx=null,saveFn=null){
   if(field.type==='section'){
     const d=document.createElement('div');d.className='form-section-title';d.textContent=field.label.replace(/^—\s*/,'').replace(/\s*—$/,'');body.appendChild(d);return;
   }
@@ -342,6 +379,84 @@ function renderField(field,data,body,mod,fd,iIdx=null){
       const commentBlock=renderCommentBlock(key,commentData,fd,mod);
       wrap.appendChild(commentBlock);
     }
+  }else if(field.type==='intervenants'){
+    // Dynamic intervenants list
+    wrap.innerHTML='';
+    const intervenants=(fd.data[mod.id]?.['__intervenants'])||[];
+    const listDiv=document.createElement('div');listDiv.id='intervenants-list-'+mod.id;listDiv.style.cssText='display:flex;flex-direction:column;gap:8px';
+    const renderIntervenants=(list)=>{
+      listDiv.innerHTML='';
+      list.forEach((p,pi)=>{
+        const card=document.createElement('div');card.style.cssText='background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative';
+        card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--accent2)">Personne ${pi+1}</span><button class="btn-del-comment" data-pi="${pi}">✕</button></div><div style="display:flex;flex-direction:column;gap:6px"><input type="text" placeholder="Nom / Prénom" value="${esc(p.nom||'')}" data-pi="${pi}" data-k="nom" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/><input type="text" placeholder="Société" value="${esc(p.societe||'')}" data-pi="${pi}" data-k="societe" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/><input type="text" placeholder="Email" value="${esc(p.email||'')}" data-pi="${pi}" data-k="email" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/><input type="text" placeholder="Téléphone" value="${esc(p.tel||'')}" data-pi="${pi}" data-k="tel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/></div>`;
+        card.querySelector('.btn-del-comment').addEventListener('click',async()=>{
+          const fdd=saveFn?{...fd,data:{...fd.data}}:getMFD();
+          if(!fdd.data[mod.id])fdd.data[mod.id]={};
+          const l=[...((fdd.data[mod.id]['__intervenants'])||[])];l.splice(pi,1);
+          fdd.data[mod.id]['__intervenants']=l;
+          saveFn?await saveFn(fdd):await saveMFD(fdd);renderIntervenants(l);
+        });
+        card.querySelectorAll('input').forEach(inp=>{
+          inp.addEventListener('change',async()=>{
+            const fdd=saveFn?{...fd,data:{...fd.data}}:getMFD();
+            if(!fdd.data[mod.id])fdd.data[mod.id]={};
+            const l=[...((fdd.data[mod.id]['__intervenants'])||[])];
+            if(!l[pi])l[pi]={};l[pi][inp.dataset.k]=inp.value;
+            fdd.data[mod.id]['__intervenants']=l;
+            saveFn?await saveFn(fdd):await saveMFD(fdd);
+          });
+        });
+        listDiv.appendChild(card);
+      });
+    };
+    renderIntervenants(intervenants);
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.textContent='+ Ajouter une personne';
+    addBtn.addEventListener('click',async()=>{
+      const fdd=saveFn?{...fd,data:{...fd.data}}:getMFD();
+      if(!fdd.data[mod.id])fdd.data[mod.id]={};
+      const l=[...((fdd.data[mod.id]['__intervenants'])||[])];l.push({nom:'',societe:'',email:'',tel:''});
+      fdd.data[mod.id]['__intervenants']=l;
+      saveFn?await saveFn(fdd):await saveMFD(fdd);renderIntervenants(l);
+    });
+    wrap.appendChild(listDiv);wrap.appendChild(addBtn);
+    body.appendChild(wrap);return;
+  }else if(field.type==='intervenants'){
+    wrap.innerHTML='';
+    const intervenants=(fd.data[mod.id]?.['__intervenants'])||[];
+    const listDiv=document.createElement('div');listDiv.style.cssText='display:flex;flex-direction:column;gap:8px';
+    const renderIntervenants=(list)=>{
+      listDiv.innerHTML='';
+      list.forEach((p,pi)=>{
+        const card=document.createElement('div');card.style.cssText='background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:10px';
+        card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px"><span style="font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--accent2)">Personne ${pi+1}</span><button class="btn-del-comment" data-pi="${pi}">✕</button></div><div style="display:flex;flex-direction:column;gap:5px"><input type="text" placeholder="Nom / Prénom" value="${esc(p.nom||'')}" data-pi="${pi}" data-k="nom" class="interv-inp"/><input type="text" placeholder="Société" value="${esc(p.societe||'')}" data-pi="${pi}" data-k="societe" class="interv-inp"/><input type="text" placeholder="Email" value="${esc(p.email||'')}" data-pi="${pi}" data-k="email" class="interv-inp"/><input type="text" placeholder="Téléphone" value="${esc(p.tel||'')}" data-pi="${pi}" data-k="tel" class="interv-inp"/></div>`;
+        card.querySelector('.btn-del-comment').addEventListener('click',async()=>{
+          const fdd=saveFn?{...fd,data:JSON.parse(JSON.stringify(fd.data))}:getMFD();
+          if(!fdd.data[mod.id])fdd.data[mod.id]={};
+          const l=JSON.parse(JSON.stringify((fdd.data[mod.id]['__intervenants'])||[]));l.splice(pi,1);
+          fdd.data[mod.id]['__intervenants']=l;saveFn?await saveFn(fdd):await saveMFD(fdd);renderIntervenants(l);
+        });
+        card.querySelectorAll('.interv-inp').forEach(inp=>{
+          inp.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-primary);font-size:13px;outline:none;width:100%';
+          inp.addEventListener('change',async()=>{
+            const fdd=saveFn?{...fd,data:JSON.parse(JSON.stringify(fd.data))}:getMFD();
+            if(!fdd.data[mod.id])fdd.data[mod.id]={};
+            const l=JSON.parse(JSON.stringify((fdd.data[mod.id]['__intervenants'])||[]));
+            if(!l[pi])l[pi]={};l[pi][inp.dataset.k]=inp.value;
+            fdd.data[mod.id]['__intervenants']=l;saveFn?await saveFn(fdd):await saveMFD(fdd);
+          });
+        });
+        listDiv.appendChild(card);
+      });
+    };
+    renderIntervenants(intervenants);
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.textContent='+ Ajouter une personne';
+    addBtn.addEventListener('click',async()=>{
+      const fdd=saveFn?{...fd,data:JSON.parse(JSON.stringify(fd.data))}:getMFD();
+      if(!fdd.data[mod.id])fdd.data[mod.id]={};
+      const l=JSON.parse(JSON.stringify((fdd.data[mod.id]['__intervenants'])||[]));l.push({nom:'',societe:'',email:'',tel:''});
+      fdd.data[mod.id]['__intervenants']=l;saveFn?await saveFn(fdd):await saveMFD(fdd);renderIntervenants(l);
+    });
+    wrap.appendChild(listDiv);wrap.appendChild(addBtn);body.appendChild(wrap);return;
   }else if(field.type==='computed'||field.type==='computed_validation'){
     wrap.innerHTML=`<label>${esc(field.label)}</label><div id="cv-${key}" class="computed-value">—</div>`;
     setTimeout(()=>updateComputed(field,fd,mod,iIdx,key),100);
@@ -366,10 +481,10 @@ function renderField(field,data,body,mod,fd,iIdx=null){
     }
     const el=wrap.querySelector(`#ff-${key}`);
     if(el)el.addEventListener('change',async()=>{
-      const fdd=getMFD();
+      const fdd=saveFn?{...fd,data:{...fd.data},repeatData:{...fd.repeatData}}:getMFD();
       if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=el.value;}
       else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=el.value;}
-      await saveMFD(fdd);updateAllComputed(mod,fd,iIdx);
+      saveFn?await saveFn(fdd):await saveMFD(fdd);updateAllComputed(mod,fd,iIdx);
     });
   }
   body.appendChild(wrap);
@@ -441,7 +556,7 @@ function updateAllComputed(mod,fd,iIdx){
   af.filter(f=>f.type==='computed'||f.type==='computed_validation').forEach(f=>{const key=iIdx!==null?`${f.id}_${iIdx}`:f.id;updateComputed(f,fd,mod,iIdx,key);});
 }
 
-function renderRepeatableBlock(mod,fd,container){
+function renderRepeatableBlock(mod,fd,container,saveFn=null){
   const instances=fd.repeatData[mod.id]||[{}];
   const block=document.createElement('div');block.className='form-block';
   const header=document.createElement('div');header.className='form-block-header';
@@ -452,7 +567,7 @@ function renderRepeatableBlock(mod,fd,container){
     const instTitle=document.createElement('div');instTitle.className='repeat-instance-title';
     instTitle.innerHTML=`<span style="color:${mod.color}">${mod.repeatLabel} ${idx+1}</span>`;
     if(instances.length>1){const del=document.createElement('button');del.className='btn-remove-instance';del.textContent='✕';del.addEventListener('click',async()=>{const fdd=getMFD();if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];fdd.repeatData[mod.id].splice(idx,1);await saveMFD(fdd);renderFormsZone();});instTitle.appendChild(del);}
-    inst.appendChild(instTitle);mod.fields.forEach(f=>renderField(f,fd.data,inst,mod,fd,idx));body.appendChild(inst);
+    inst.appendChild(instTitle);mod.fields.forEach(f=>renderField(f,fd.data,inst,mod,fd,idx,saveFn));body.appendChild(inst);
   });
   const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.textContent=`+ Ajouter ${mod.repeatLabel}`;
   addBtn.addEventListener('click',async()=>{const fdd=getMFD();if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];fdd.repeatData[mod.id].push({});await saveMFD(fdd);renderFormsZone();});
@@ -460,7 +575,7 @@ function renderRepeatableBlock(mod,fd,container){
 }
 
 // ── CAHIER MULTI-ANNÉES ───────────────────────────────────────────
-function renderCahierBlock(mod,fd,container){
+function renderCahierBlock(mod,fd,container,saveFn=null){
   const block=document.createElement('div');block.className='form-block';
   block.innerHTML=`<div class="form-block-header"><div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div></div><div class="form-block-body" id="fb-cahier"></div>`;
   container.appendChild(block);
@@ -620,6 +735,7 @@ function openMissionModal(id=null){
   editingMissionId=id;const m=id?missions.find(x=>x.id===id):null;
   document.getElementById('modal-mission-title').textContent=id?'Modifier la mission':'Nouvelle mission';
   document.getElementById('mission-type').value=m?.type||'audit';
+  const nbLocEl=document.getElementById('mission-nb-locaux');if(nbLocEl)nbLocEl.value=m?.nbLocaux||1;
   document.getElementById('mission-date-start').value=m?.dateStart||today();
   document.getElementById('mission-date-end').value=m?.dateEnd||'';
   document.getElementById('mission-operator').value=m?.operator||'';
@@ -629,7 +745,7 @@ function openMissionModal(id=null){
   document.getElementById('modal-mission').classList.remove('hidden');
 }
 async function saveMission(){
-  const m={id:editingMissionId||uid(),siteId:currentSiteId,type:v('mission-type'),dateStart:v('mission-date-start'),dateEnd:v('mission-date-end'),operator:v('mission-operator'),status:v('mission-status'),ref:v('mission-ref'),notes:v('mission-notes'),updatedAt:now(),createdAt:editingMissionId?(missions.find(x=>x.id===editingMissionId)?.createdAt||now()):now()};
+  const m={id:editingMissionId||uid(),siteId:currentSiteId,type:v('mission-type'),dateStart:v('mission-date-start'),dateEnd:v('mission-date-end'),operator:v('mission-operator'),status:v('mission-status'),ref:v('mission-ref'),notes:v('mission-notes'),nbLocaux:vn('mission-nb-locaux')||1,updatedAt:now(),createdAt:editingMissionId?(missions.find(x=>x.id===editingMissionId)?.createdAt||now()):now()};
   await dbPut('missions',m);if(editingMissionId){const i=missions.findIndex(x=>x.id===editingMissionId);if(i>=0)missions[i]=m;else missions.push(m);}else missions.push(m);
   document.getElementById('modal-mission').classList.add('hidden');renderSiteView();showToast(editingMissionId?'Mission mise à jour ✓':'Mission créée ✓','success');
 }

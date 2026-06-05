@@ -352,6 +352,11 @@
         <select id="mission-status"><option value="planifie">Planifiée</option><option value="en_cours">En cours</option><option value="termine">Terminée</option></select>
       </div>
       <div class="form-group"><label>Référence / N° contrat</label><input type="text" id="mission-ref"/></div>
+      <div class="form-group">
+        <label>Nombre de locaux techniques à auditer</label>
+        <input type="number" id="mission-nb-locaux" min="1" max="20" value="1" placeholder="1"/>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px">Chaque local aura ses propres modules de relevés</div>
+      </div>
       <div class="form-group"><label>Notes</label><textarea id="mission-notes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
