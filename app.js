@@ -284,9 +284,7 @@ function renderFormsZone(){
   if(nbLocaux<=1){
     // Single local — render directly
     fd.activeModules.forEach(modId=>{
-
-  fd.activeModules.forEach(modId=>{
-    const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
+      const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
       if(mod.multiYear)renderCahierBlock(mod,fd,container);
       else if(mod.repeatable)renderRepeatableBlock(mod,fd,container);
       else renderFormBlock(mod,fd,container);
