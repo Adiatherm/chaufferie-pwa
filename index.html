@@ -91,6 +91,7 @@
       <button class="tab" data-mtab="forms">📝 Relevés</button>
       <button class="tab" data-mtab="notes">✏️ Notes</button>
       <button class="tab" data-mtab="photos">🖼️ Photos</button>
+      <button class="tab" data-mtab="incident" style="display:none" id="tab-incident-btn">🚨 Incident</button>
       <button class="tab" data-mtab="report">📄 Rapport</button>
     </nav>
 
@@ -168,6 +169,37 @@
       </div>
     </div>
 
+    <!-- INCIDENT -->
+    <div id="mtab-incident" class="tab-content">
+      <div class="incident-zone">
+        <h2>🚨 Rapport d'incident</h2>
+        <p>Rapport ciblé — tient sur une page</p>
+        <div class="settings-card">
+          <h3>Objet de l'incident</h3>
+          <textarea id="incident-objet" placeholder="Description de l'incident / constat..." rows="3"></textarea>
+        </div>
+        <div class="settings-card">
+          <h3>Champs libres paramétrables</h3>
+          <div id="incident-fields-list"></div>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input type="text" id="incident-new-field" placeholder="Libellé du champ..." style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);font-size:13px;outline:none"/>
+            <button class="btn-primary btn-sm" id="btn-add-incident-field" style="width:auto;padding:8px 14px">＋</button>
+          </div>
+        </div>
+        <div class="settings-card">
+          <h3>Conclusion</h3>
+          <select id="incident-conclusion">
+            <option value="">Sélectionner...</option>
+            <option value="urgent">⚠️ Intervention urgente requise</option>
+            <option value="surveiller">👁️ À surveiller</option>
+            <option value="traite">✅ Traité sur place</option>
+            <option value="info">ℹ️ Informatif</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="btn-export-incident-pdf" style="background:var(--danger)">🚨 Exporter rapport d'incident PDF</button>
+      </div>
+    </div>
+
     <!-- RAPPORT -->
     <div id="mtab-report" class="tab-content">
       <div class="report-zone">
@@ -196,6 +228,7 @@
         <div class="report-actions">
           <button class="btn-primary" id="btn-export-pdf">📄 Exporter PDF</button>
           <button class="btn-primary" id="btn-export-excel" style="background:var(--success)">📊 Exporter Excel</button>
+          <button class="btn-secondary" id="btn-export-word">📝 Exporter Word (photos)</button>
           <button class="btn-secondary" id="btn-export-csv">📋 Exporter CSV équipements</button>
         </div>
         <div class="tip-box">L'export Excel génère un classeur avec un onglet par module de relevé + équipements + photos + notes.</div>
@@ -247,6 +280,7 @@
     <div class="modal-header"><h2 id="modal-site-title">Nouveau site</h2><button class="modal-close" data-modal="modal-site">✕</button></div>
     <div class="modal-body">
       <div class="form-group"><label>Nom *</label><input type="text" id="site-name" placeholder="Résidence Les Acacias"/></div>
+      <div class="form-group"><label>Code affaire</label><input type="text" id="site-code-affaire" placeholder="EX: 2024-001"/></div>
       <div class="form-group"><label>Adresse</label><input type="text" id="site-address"/></div>
       <div class="form-row">
         <div class="form-group"><label>Code postal</label><input type="text" id="site-zip"/></div>
@@ -283,7 +317,6 @@
   <div class="modal-content">
     <div class="modal-header"><h2 id="modal-mission-title">Nouvelle mission</h2><button class="modal-close" data-modal="modal-mission">✕</button></div>
     <div class="modal-body">
-      <div class="form-group"><label>Intitulé *</label><input type="text" id="mission-name"/></div>
       <div class="form-group"><label>Type</label>
         <select id="mission-type"><option value="audit">Audit / Diagnostic</option><option value="inventaire">Inventaire initial</option><option value="controle">Contrôle récurrent</option><option value="maintenance">Visite de maintenance</option><option value="expertise">Expertise</option><option value="autre">Autre</option></select>
       </div>

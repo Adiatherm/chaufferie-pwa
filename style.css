@@ -255,3 +255,59 @@ input[type=date],input[type=time]{color-scheme:dark}
 
 /* TIP BOX */
 .tip-box{background:var(--bg-elevated);border-left:3px solid var(--info);border-radius:0 8px 8px 0;padding:10px 12px;font-size:12px;color:var(--text-secondary);line-height:1.5}
+
+/* YESNO3 (Oui / Non / N/A / Pas d'info) */
+.yesno4-group{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px}
+.yesno4-btn{padding:6px 2px;border:1px solid var(--border);border-radius:6px;background:var(--bg-elevated);color:var(--text-secondary);font-family:var(--font-display);font-size:11px;font-weight:600;cursor:pointer;text-align:center;transition:all .2s}
+.yesno4-btn.y.active{background:rgba(34,197,94,.15);border-color:var(--success);color:var(--success)}
+.yesno4-btn.n.active{background:rgba(239,68,68,.15);border-color:var(--danger);color:var(--danger)}
+.yesno4-btn.na.active{background:rgba(107,114,128,.15);border-color:#6b7280;color:#9ca3af}
+.yesno4-btn.pi.active{background:rgba(234,179,8,.15);border-color:var(--warning);color:var(--warning)}
+
+/* COMMENT TAGS */
+.comment-block{margin-top:6px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--bg-elevated)}
+.comment-tags{display:flex;gap:5px;margin-bottom:6px;flex-wrap:wrap}
+.ctag{padding:3px 8px;border-radius:12px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .2s}
+.ctag.pos{background:rgba(34,197,94,.1);color:var(--success);border-color:rgba(34,197,94,.3)}
+.ctag.neg{background:rgba(239,68,68,.1);color:var(--danger);border-color:rgba(239,68,68,.3)}
+.ctag.neu{background:rgba(107,114,128,.1);color:var(--text-secondary);border-color:rgba(107,114,128,.3)}
+.ctag.active.pos{background:rgba(34,197,94,.3);border-color:var(--success)}
+.ctag.active.neg{background:rgba(239,68,68,.3);border-color:var(--danger)}
+.ctag.active.neu{background:rgba(107,114,128,.3);border-color:#6b7280}
+.comment-entry{display:flex;gap:6px;align-items:flex-start;margin-top:5px}
+.comment-entry textarea{flex:1;resize:none;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-family:var(--font-body);font-size:12px;outline:none;min-height:50px}
+.comment-entry textarea:focus{border-color:var(--accent)}
+.btn-del-comment{background:none;border:none;color:var(--text-muted);font-size:13px;cursor:pointer;padding:2px;margin-top:4px;flex-shrink:0}
+.btn-add-comment{background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 8px;color:var(--text-muted);font-size:11px;cursor:pointer;margin-top:4px;width:100%;text-align:left;transition:all .2s}
+.btn-add-comment:active{border-color:var(--accent);color:var(--accent)}
+
+/* CONDITIONAL FIELDS */
+.conditional-fields{margin-top:6px;padding:8px;background:rgba(30,127,212,.06);border:1px solid rgba(30,127,212,.2);border-radius:8px;display:flex;flex-direction:column;gap:8px}
+
+/* MULTI-YEAR CAHIER */
+.year-block{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:10px}
+.year-block-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg-elevated);cursor:pointer}
+.year-block-title{font-family:var(--font-display);font-size:15px;font-weight:700;color:var(--accent2)}
+.year-block-body{padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.year-block-body.collapsed{display:none}
+.obligation-row{display:flex;flex-direction:column;gap:4px;padding:8px;background:var(--bg-elevated);border-radius:8px;border:1px solid var(--border)}
+.obligation-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.obligation-label{font-size:13px;font-weight:500}
+.obligation-freq{font-family:var(--font-mono);font-size:10px;color:var(--accent)}
+.obligation-dates{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.obl-date-row{display:flex;align-items:center;gap:6px}
+.obl-date-label{font-family:var(--font-mono);font-size:10px;color:var(--text-muted);width:40px;flex-shrink:0}
+.btn-add-year{background:rgba(34,197,94,.1);border:1px dashed var(--success);border-radius:8px;padding:8px;color:var(--success);font-family:var(--font-display);font-size:13px;cursor:pointer;width:100%;text-align:center;margin-top:4px}
+
+/* VALIDATION BADGE */
+.validation-ok{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);color:var(--success);border-radius:6px;padding:4px 10px;font-family:var(--font-mono);font-size:11px}
+.validation-ko{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--danger);border-radius:6px;padding:4px 10px;font-family:var(--font-mono);font-size:11px}
+.validation-na{background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-muted);border-radius:6px;padding:4px 10px;font-family:var(--font-mono);font-size:11px}
+
+/* INCIDENT REPORT */
+.incident-zone{padding:14px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;padding-bottom:30px}
+.incident-zone h2{font-family:var(--font-display);font-size:19px;font-weight:700}
+.incident-zone p{color:var(--text-secondary);font-size:12px;margin-top:2px}
+.incident-field-row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px}
+.incident-field-label{font-size:13px;flex:1}
+.incident-field-del{background:none;border:none;color:var(--text-muted);font-size:13px;cursor:pointer}
