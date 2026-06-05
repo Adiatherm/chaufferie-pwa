@@ -153,6 +153,10 @@ function setupEvents(){
     notesSaveTimer=setTimeout(saveNotes,1000);
   });
   document.getElementById('btn-add-photo-row').addEventListener('click',addPhotoRow);
+  document.getElementById('btn-add-local').addEventListener('click',async()=>{
+    const fdd=getMFD();if(!fdd.locaux)fdd.locaux=[];
+    fdd.locaux.push({type:'Chaufferie'});await saveMFD(fdd);renderFormsZone();
+  });
   document.getElementById('btn-export-pdf').addEventListener('click',exportPDF);
   document.getElementById('btn-export-excel').addEventListener('click',exportExcel);
   document.getElementById('btn-export-csv').addEventListener('click',exportCSV);
@@ -257,64 +261,105 @@ function getMFD(){return formDataStore.find(f=>f.id===currentMissionId)||{id:cur
 async function saveMFD(fd){await dbPut('formdata',fd);const idx=formDataStore.findIndex(f=>f.id===currentMissionId);if(idx>=0)formDataStore[idx]=fd;else formDataStore.push(fd);}
 
 function renderFormsZone(){
-  const mission=missions.find(x=>x.id===currentMissionId);
-  const nbLocaux=mission?.nbLocaux||1;
   const fd=getMFD();
-  const container=document.getElementById('active-forms-container');
-  container.innerHTML='';
+  const locaux=(fd.locaux)||[];
 
-  // ── MODULE TOGGLES ─────────────────────────────────────────
-  const sel=document.getElementById('modules-selector');
-  sel.innerHTML='<h3>Modules à relever pour cette mission</h3><div class="module-toggles" id="module-toggles"></div>';
+  // ── LOCAUX SETUP ──────────────────────────────────────────
+  renderLocauxSetup(locaux, fd);
+
+  // ── LOCAL TABS BAR ────────────────────────────────────────
+  const tabsBar=document.getElementById('local-tabs-bar');
+  const modulesSel=document.getElementById('modules-selector');
+  const formsContainer=document.getElementById('active-forms-container');
+  formsContainer.innerHTML='';
+
+  if(!locaux.length){
+    tabsBar.style.display='none';modulesSel.style.display='none';
+    return;
+  }
+  tabsBar.style.display='';modulesSel.style.display='';
+
+  const activeLocal=fd.activeLocalIdx||0;
+  // Build tabs
+  tabsBar.innerHTML='';
+  locaux.forEach((loc,i)=>{
+    const t=document.createElement('button');
+    t.className='local-tab'+(i===activeLocal?' local-tab-active':'');
+    t.textContent=`${loc.type||'Local '+(i+1)}`;
+    t.addEventListener('click',async()=>{
+      const fdd=getMFD();fdd.activeLocalIdx=i;await saveMFD(fdd);renderFormsZone();
+    });
+    tabsBar.appendChild(t);
+  });
+
+  // ── MODULE TOGGLES FOR ACTIVE LOCAL ───────────────────────
+  const localKey=`local_${activeLocal}`;
+  if(!fd.localModules)fd.localModules={};
+  const activeModules=fd.localModules[localKey]||[];
+
+  modulesSel.innerHTML='<h3 style="font-family:var(--font-display);font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text-secondary)">Modules pour ce local</h3><div class="module-toggles" id="module-toggles"></div>';
   const grid=document.getElementById('module-toggles');
   FORM_MODULES.forEach(mod=>{
-    const isActive=fd.activeModules.includes(mod.id);
+    const isActive=activeModules.includes(mod.id);
     const btn=document.createElement('div');btn.className='module-toggle'+(isActive?' active':'');
     btn.innerHTML=`<span class="module-toggle-icon">${mod.icon}</span><span class="module-toggle-label" style="color:${mod.color}">${mod.label}</span><div class="mt-check"></div>`;
     btn.addEventListener('click',async()=>{
-      const fdd=getMFD();
-      if(fdd.activeModules.includes(mod.id))fdd.activeModules=fdd.activeModules.filter(x=>x!==mod.id);
-      else fdd.activeModules.push(mod.id);
-      await saveMFD(fdd);renderFormsZone();
+      const fdd=getMFD();if(!fdd.localModules)fdd.localModules={};
+      const mods=[...(fdd.localModules[localKey]||[])];
+      const idx=mods.indexOf(mod.id);if(idx>=0)mods.splice(idx,1);else mods.push(mod.id);
+      fdd.localModules[localKey]=mods;await saveMFD(fdd);renderFormsZone();
     });
     grid.appendChild(btn);
   });
 
-  // ── MULTI-LOCAUX ───────────────────────────────────────────
-  if(nbLocaux<=1){
-    // Single local — render directly
-    fd.activeModules.forEach(modId=>{
-      const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
-      if(mod.multiYear)renderCahierBlock(mod,fd,container);
-      else if(mod.repeatable)renderRepeatableBlock(mod,fd,container);
-      else renderFormBlock(mod,fd,container);
-    });
-  } else {
-    // Multiple locaux — tab per local
-    const activeLocal=fd.localTabs?.activeLocal||0;
-    // Tab bar
-    const tabBar=document.createElement('div');tabBar.className='local-tab-bar';
-    for(let i=0;i<nbLocaux;i++){
-      const t=document.createElement('button');t.className='local-tab'+(i===activeLocal?' active':'');
-      t.textContent=nbLocaux===1?'Local technique':`Local ${i+1}`;
-      t.addEventListener('click',async()=>{const fdd=getMFD();if(!fdd.localTabs)fdd.localTabs={};fdd.localTabs.activeLocal=i;await saveMFD(fdd);renderFormsZone();});
-      tabBar.appendChild(t);
-    }
-    container.appendChild(tabBar);
-    // Build a local-scoped fd proxy
-    const localKey=`local_${activeLocal}`;
-    const localData=(fd.localData||{})[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
-    const localFd={id:fd.id,activeModules:fd.activeModules,data:localData.data||{},repeatData:localData.repeatData||{},comments:localData.comments||{},cahierYears:localData.cahierYears||{}};
-    const localSave=async(fdd)=>{const mainFdd=getMFD();if(!mainFdd.localData)mainFdd.localData={};mainFdd.localData[localKey]={data:fdd.data,repeatData:fdd.repeatData,comments:fdd.comments||{},cahierYears:fdd.cahierYears||{}};await saveMFD(mainFdd);};
-    // Render modules for this local
-    fd.activeModules.forEach(modId=>{
-      const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
-      if(mod.multiYear)renderCahierBlock(mod,localFd,container,localSave);
-      else if(mod.repeatable)renderRepeatableBlock(mod,localFd,container,localSave);
-      else renderFormBlock(mod,localFd,container,localSave);
-    });
-  }
+  // ── RENDER ACTIVE MODULES FOR THIS LOCAL ──────────────────
+  const localData=(fd.localData||{})[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
+  const localFd={id:fd.id,activeModules,data:localData.data||{},repeatData:localData.repeatData||{},comments:localData.comments||{},cahierYears:localData.cahierYears||{}};
+  const localSave=async(fdd)=>{
+    const mainFdd=getMFD();
+    if(!mainFdd.localData)mainFdd.localData={};
+    mainFdd.localData[localKey]={data:fdd.data,repeatData:fdd.repeatData,comments:fdd.comments||{},cahierYears:fdd.cahierYears||{}};
+    await saveMFD(mainFdd);
+  };
+
+  activeModules.forEach(modId=>{
+    const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
+    if(mod.multiYear)renderCahierBlock(mod,localFd,formsContainer,localSave);
+    else if(mod.repeatable)renderRepeatableBlock(mod,localFd,formsContainer,localSave);
+    else renderFormBlock(mod,localFd,formsContainer,localSave);
+  });
 }
+
+const LOCAL_TYPES=['Chaufferie','Sous-station principale','Sous-station','Local TGBT','Local surpresseur','Autre'];
+
+function renderLocauxSetup(locaux, fd){
+  const container=document.getElementById('locaux-list-container');
+  container.innerHTML='';
+  if(!locaux.length){
+    container.innerHTML='<div class="local-empty">Aucun local — appuyez sur + Ajouter</div>';
+    return;
+  }
+  locaux.forEach((loc,i)=>{
+    const row=document.createElement('div');row.className='local-item';
+    row.innerHTML=`<span class="local-item-num">${i+1}</span>`;
+    const sel=document.createElement('select');sel.className='local-item-type';
+    LOCAL_TYPES.forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;if(t===loc.type)o.selected=true;sel.appendChild(o);});
+    sel.addEventListener('change',async()=>{
+      const fdd=getMFD();if(!fdd.locaux)fdd.locaux=[];fdd.locaux[i].type=sel.value;await saveMFD(fdd);renderFormsZone();
+    });
+    const del=document.createElement('button');del.className='local-item-del';del.textContent='🗑️';del.title='Supprimer ce local';
+    del.addEventListener('click',async()=>{
+      if(!confirm('Supprimer ce local et tous ses relevés ?'))return;
+      const fdd=getMFD();fdd.locaux.splice(i,1);
+      // Clean up localData and localModules for this local
+      delete (fdd.localData||{})[`local_${i}`];delete (fdd.localModules||{})[`local_${i}`];
+      if(fdd.activeLocalIdx>=fdd.locaux.length)fdd.activeLocalIdx=Math.max(0,fdd.locaux.length-1);
+      await saveMFD(fdd);renderFormsZone();
+    });
+    row.appendChild(sel);row.appendChild(del);container.appendChild(row);
+  });
+}
+
 
 function renderFormBlock(mod,fd,container,saveFn=null){
   const block=document.createElement('div');block.className='form-block';
@@ -733,7 +778,6 @@ function openMissionModal(id=null){
   editingMissionId=id;const m=id?missions.find(x=>x.id===id):null;
   document.getElementById('modal-mission-title').textContent=id?'Modifier la mission':'Nouvelle mission';
   document.getElementById('mission-type').value=m?.type||'audit';
-  const nbLocEl=document.getElementById('mission-nb-locaux');if(nbLocEl)nbLocEl.value=m?.nbLocaux||1;
   document.getElementById('mission-date-start').value=m?.dateStart||today();
   document.getElementById('mission-date-end').value=m?.dateEnd||'';
   document.getElementById('mission-operator').value=m?.operator||'';
@@ -743,7 +787,7 @@ function openMissionModal(id=null){
   document.getElementById('modal-mission').classList.remove('hidden');
 }
 async function saveMission(){
-  const m={id:editingMissionId||uid(),siteId:currentSiteId,type:v('mission-type'),dateStart:v('mission-date-start'),dateEnd:v('mission-date-end'),operator:v('mission-operator'),status:v('mission-status'),ref:v('mission-ref'),notes:v('mission-notes'),nbLocaux:vn('mission-nb-locaux')||1,updatedAt:now(),createdAt:editingMissionId?(missions.find(x=>x.id===editingMissionId)?.createdAt||now()):now()};
+  const m={id:editingMissionId||uid(),siteId:currentSiteId,type:v('mission-type'),dateStart:v('mission-date-start'),dateEnd:v('mission-date-end'),operator:v('mission-operator'),status:v('mission-status'),ref:v('mission-ref'),notes:v('mission-notes'),updatedAt:now(),createdAt:editingMissionId?(missions.find(x=>x.id===editingMissionId)?.createdAt||now()):now()};
   await dbPut('missions',m);if(editingMissionId){const i=missions.findIndex(x=>x.id===editingMissionId);if(i>=0)missions[i]=m;else missions.push(m);}else missions.push(m);
   document.getElementById('modal-mission').classList.add('hidden');renderSiteView();showToast(editingMissionId?'Mission mise à jour ✓':'Mission créée ✓','success');
 }

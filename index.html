@@ -132,7 +132,17 @@
     <!-- RELEVÉS -->
     <div id="mtab-forms" class="tab-content">
       <div class="forms-zone" id="forms-zone">
-        <div class="modules-selector" id="modules-selector"></div>
+        <!-- ÉTAPE 1 : Définition des locaux techniques -->
+        <div class="locaux-setup-panel" id="locaux-setup-panel">
+          <div class="locaux-setup-header">
+            <span>🏭 Locaux techniques à auditer</span>
+            <button class="btn-sm btn-primary" id="btn-add-local" style="width:auto;padding:6px 12px">＋ Ajouter</button>
+          </div>
+          <div id="locaux-list-container"></div>
+        </div>
+        <!-- ÉTAPE 2 : Sélection des modules par local (tabs) -->
+        <div id="local-tabs-bar" class="local-tab-bar" style="display:none"></div>
+        <div class="modules-selector" id="modules-selector" style="display:none"></div>
         <div id="active-forms-container"></div>
       </div>
     </div>
@@ -341,7 +351,13 @@
     <div class="modal-header"><h2 id="modal-mission-title">Nouvelle mission</h2><button class="modal-close" data-modal="modal-mission">✕</button></div>
     <div class="modal-body">
       <div class="form-group"><label>Type</label>
-        <select id="mission-type"><option value="audit">Audit / Diagnostic</option><option value="inventaire">Inventaire initial</option><option value="controle">Contrôle récurrent</option><option value="maintenance">Visite de maintenance</option><option value="expertise">Expertise</option><option value="autre">Autre</option></select>
+        <select id="mission-type">
+          <option value="audit">Mission d'audit</option>
+          <option value="intervention">Intervention ponctuelle</option>
+          <option value="etude_moe">Mission d'étude &amp; maîtrise d'œuvre</option>
+          <option value="controle">Contrôle d'exploitation</option>
+          <option value="incident">Rapport d'incident</option>
+        </select>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Date début</label><input type="date" id="mission-date-start"/></div>
@@ -352,11 +368,7 @@
         <select id="mission-status"><option value="planifie">Planifiée</option><option value="en_cours">En cours</option><option value="termine">Terminée</option></select>
       </div>
       <div class="form-group"><label>Référence / N° contrat</label><input type="text" id="mission-ref"/></div>
-      <div class="form-group">
-        <label>Nombre de locaux techniques à auditer</label>
-        <input type="number" id="mission-nb-locaux" min="1" max="20" value="1" placeholder="1"/>
-        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:3px">Chaque local aura ses propres modules de relevés</div>
-      </div>
+
       <div class="form-group"><label>Notes</label><textarea id="mission-notes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">
