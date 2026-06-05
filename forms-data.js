@@ -4,28 +4,13 @@
 
 const FORM_MODULES = [
 
-  // ── 1. GÉNÉRALITÉS BÂTIMENT ────────────────────────────────
+  // ── 1. GÉNÉRALITÉS MISSION ────────────────────────────────
   {
     id: 'generalites',
-    label: 'Généralités bâtiment',
-    icon: '🏢',
+    label: 'Généralités',
+    icon: '📋',
     color: '#3b82f6',
     fields: [
-      {
-        id: 'annee_construction', label: 'Année / période de construction', type: 'select',
-        options: ['Avant 1948','1948–1974','1975–1989','1990–2000','2001–2012','Après 2012','Inconnue']
-      },
-      { id: 'annee_exacte', label: 'Année exacte (si connue)', type: 'number', placeholder: '1982' },
-      { id: 'nb_batiments', label: 'Nombre de bâtiments', type: 'number' },
-      { id: 'nb_niveaux', label: 'Nombre de niveaux', type: 'number' },
-      { id: 'nb_logements', label: 'Nombre de logements', type: 'number' },
-      { id: 'nb_locaux_pro', label: 'Dont locaux professionnels', type: 'number' },
-      { id: 'hauteur_statique', label: 'Hauteur statique (m)', type: 'number' },
-      { id: 'emplacement_chauf', label: 'Emplacement chaufferie', type: 'text', placeholder: 'Sous-sol -1' },
-      {
-        id: 'energie_principale', label: 'Énergie principale', type: 'select',
-        options: ['Gaz naturel','Fioul','CPCU / Réseau chaleur','Pompe à chaleur','Électrique','Autre']
-      },
       {
         id: 'puissance_chaudiere', label: 'Puissance installée', type: 'select',
         options: ['< 70 kW','≥ 70 kW et < 400 kW','≥ 400 kW et < 1 MW','≥ 1 MW']
@@ -36,6 +21,19 @@ const FORM_MODULES = [
       },
       { id: 'schema_principe', label: 'Schéma de principe disponible', type: 'yesno' },
       { id: 'cahier_chauf', label: 'Cahier de chaufferie présent', type: 'yesno' },
+      { id: 'section_intervenants', label: '— PERSONNES PRÉSENTES LORS DE LA VISITE —', type: 'section' },
+      { id: 'intervenant_1_nom', label: 'Personne 1 — Nom / Prénom', type: 'text', placeholder: 'Jean Dupont' },
+      { id: 'intervenant_1_societe', label: 'Personne 1 — Société', type: 'text' },
+      { id: 'intervenant_1_email', label: 'Personne 1 — Email', type: 'text', placeholder: 'jean@example.com' },
+      { id: 'intervenant_1_tel', label: 'Personne 1 — Téléphone', type: 'text', placeholder: '06 12 34 56 78' },
+      { id: 'intervenant_2_nom', label: 'Personne 2 — Nom / Prénom', type: 'text' },
+      { id: 'intervenant_2_societe', label: 'Personne 2 — Société', type: 'text' },
+      { id: 'intervenant_2_email', label: 'Personne 2 — Email', type: 'text' },
+      { id: 'intervenant_2_tel', label: 'Personne 2 — Téléphone', type: 'text' },
+      { id: 'intervenant_3_nom', label: 'Personne 3 — Nom / Prénom', type: 'text' },
+      { id: 'intervenant_3_societe', label: 'Personne 3 — Société', type: 'text' },
+      { id: 'intervenant_3_email', label: 'Personne 3 — Email', type: 'text' },
+      { id: 'intervenant_3_tel', label: 'Personne 3 — Téléphone', type: 'text' },
       { id: 'notes_generalites', label: 'Observations', type: 'textarea' },
     ]
   },

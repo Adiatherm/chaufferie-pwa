@@ -217,7 +217,7 @@ function renderSiteView(){
   const site=sites.find(s=>s.id===currentSiteId);
   const panel=document.getElementById('site-info-panel');panel.innerHTML='';
   if(site){
-    [['Code affaire',site.codeAffaire],['Nom',site.name],['Adresse',[site.address,site.zip,site.city].filter(Boolean).join(', ')],['Énergie',site.energie],['Contact',site.contact]].filter(([,v])=>v).forEach(([l,v])=>{const d=document.createElement('div');d.className='info-row';d.innerHTML=`<div class="info-label">${l}</div><div class="info-value">${esc(String(v))}</div>`;panel.appendChild(d);});
+    [['Code affaire',site.codeAffaire],['Nom',site.name],['Adresse',[site.address,site.zip,site.city].filter(Boolean).join(', ')],['Période',site.anneeExacte?String(site.anneeExacte):site.periode],['Bâtiments',site.batiments],['Niveaux',site.niveaux],['Logements',site.logements?`${site.logements}${site.locauxPro?' (dont '+site.locauxPro+' pro)':''}`:null],['Hauteur statique',site.hauteur?site.hauteur+' m':null],['Chaufferie',site.emplacement],['Énergie',site.energie],['Contact',site.contact]].filter(([,v])=>v).forEach(([l,v])=>{const d=document.createElement('div');d.className='info-row';d.innerHTML=`<div class="info-label">${l}</div><div class="info-value">${esc(String(v))}</div>`;panel.appendChild(d);});
     const btn=document.createElement('button');btn.className='btn-secondary';btn.textContent='✏️ Modifier ce site';btn.addEventListener('click',()=>openSiteModal(currentSiteId));panel.appendChild(btn);
   }
 }
@@ -599,14 +599,17 @@ function openSiteModal(id=null){
   document.getElementById('modal-site-title').textContent=id?'Modifier le site':'Nouveau site';
   ['name','address','city','zip','contact','notes','emplacement'].forEach(k=>{const el=document.getElementById('site-'+k);if(el)el.value=s?.[k]||'';});
   const caEl=document.getElementById('site-code-affaire');if(caEl)caEl.value=s?.codeAffaire||'';
-  document.getElementById('site-construction').value=s?.construction||'classique';
+  const periodeEl=document.getElementById('site-periode');if(periodeEl)periodeEl.value=s?.periode||'';
+  const anneeEl=document.getElementById('site-annee-exacte');if(anneeEl)anneeEl.value=s?.anneeExacte||'';
   document.getElementById('site-energie').value=s?.energie||'Gaz naturel';
   ['batiments','niveaux','logements','hauteur'].forEach(k=>{const el=document.getElementById('site-'+k);if(el)el.value=s?.[k]||'';});
+  const locEl=document.getElementById('site-locaux-pro');if(locEl)locEl.value=s?.locauxPro||'';
+  const lbEl=document.getElementById('site-logt-bat');if(lbEl)lbEl.value=s?.logtBat||'';
   document.getElementById('modal-site').classList.remove('hidden');setTimeout(()=>document.getElementById('site-name').focus(),300);
 }
 async function saveSite(){
   const name=document.getElementById('site-name').value.trim();if(!name){showToast('Nom obligatoire','error');return;}
-  const s={id:editingSiteId||uid(),name,codeAffaire:v('site-code-affaire'),address:v('site-address'),city:v('site-city'),zip:v('site-zip'),construction:v('site-construction'),energie:v('site-energie'),batiments:vn('site-batiments'),niveaux:vn('site-niveaux'),logements:vn('site-logements'),hauteur:vn('site-hauteur'),emplacement:v('site-emplacement'),contact:v('site-contact'),notes:v('site-notes'),updatedAt:now(),createdAt:editingSiteId?(sites.find(x=>x.id===editingSiteId)?.createdAt||now()):now()};
+  const s={id:editingSiteId||uid(),name,codeAffaire:v('site-code-affaire'),address:v('site-address'),city:v('site-city'),zip:v('site-zip'),periode:v('site-periode'),anneeExacte:vn('site-annee-exacte'),batiments:vn('site-batiments'),niveaux:vn('site-niveaux'),logements:vn('site-logements'),locauxPro:vn('site-locaux-pro'),hauteur:vn('site-hauteur'),logtBat:vn('site-logt-bat'),emplacement:v('site-emplacement'),energie:v('site-energie'),contact:v('site-contact'),notes:v('site-notes'),updatedAt:now(),createdAt:editingSiteId?(sites.find(x=>x.id===editingSiteId)?.createdAt||now()):now()};
   await dbPut('sites',s);if(editingSiteId){const i=sites.findIndex(x=>x.id===editingSiteId);if(i>=0)sites[i]=s;else sites.push(s);}else sites.push(s);
   document.getElementById('modal-site').classList.add('hidden');renderSites(document.getElementById('site-search').value);if(currentSiteId===editingSiteId)renderSiteView();showToast(editingSiteId?'Site mis à jour ✓':'Site créé ✓','success');
 }
@@ -732,7 +735,7 @@ async function exportExcel(){
   const rWs=wb.addSheet('Récapitulatif');rWs.setColWidths([30,40]);
   rWs.addRow(['ADIATOOL — Rapport'],{bold:true,size:14,bg:'1e3f5e',fg:'FFFFFF'});rWs.addRow([]);
   rWs.addRow(['SITE',''],{bold:true,bg:'2d5a8e',fg:'FFFFFF'});
-  [['Code affaire',site?.codeAffaire],['Nom',site?.name],['Adresse',[site?.address,site?.zip,site?.city].filter(Boolean).join(', ')],['Énergie',site?.energie],['Contact',site?.contact]].forEach(([l,v])=>{if(v)rWs.addRow([l,v]);});
+  [['Code affaire',site?.codeAffaire],['Nom',site?.name],['Adresse',[site?.address,site?.zip,site?.city].filter(Boolean).join(', ')],['Période constr.',site?.anneeExacte?String(site.anneeExacte):site?.periode],['Bâtiments',site?.batiments],['Niveaux',site?.niveaux],['Logements',site?.logements],['Hauteur statique',site?.hauteur?site.hauteur+' m':null],['Emplacement chaufferie',site?.emplacement],['Énergie',site?.energie],['Contact',site?.contact]].forEach(([l,v])=>{if(v)rWs.addRow([l,String(v)]);});
   rWs.addRow([]);rWs.addRow(['MISSION',''],{bold:true,bg:'2d5a8e',fg:'FFFFFF'});
   [['Type',TL[mission?.type]],['Statut',SL[mission?.status]],['Date',mission?.dateStart],['Intervenant',mission?.operator],['Référence',mission?.ref]].forEach(([l,v])=>{if(v)rWs.addRow([l,v]);});
   rWs.addRow(['Équipements',mEqs.length]);rWs.addRow(['Export',new Date().toLocaleDateString('fr-FR')]);
@@ -899,7 +902,7 @@ async function exportPDF(){
 </head><body>
 <div class="hdr"><div><h1>ADIA<span>TOOL</span></h1><div style="color:#e8f0f8;font-size:12px;font-weight:700;margin-top:5px">${esc(TL[mission?.type]||'Rapport')}</div></div><div style="text-align:right;color:#6a90b0;font-size:8px">Généré le ${new Date().toLocaleDateString('fr-FR')}<br>${mEqs.length} équipement(s)</div></div>
 <div class="grid">
-<div class="card"><h2>🏢 Site</h2>${[['Code affaire',site?.codeAffaire],['Nom',site?.name],['Adresse',[site?.address,site?.zip,site?.city].filter(Boolean).join(', ')],['Énergie',site?.energie],['Contact',site?.contact]].filter(([,v])=>v).map(([l,v])=>`<div class="f"><span class="fl">${l}</span><span class="fv">${esc(String(v))}</span></div>`).join('')}</div>
+<div class="card"><h2>🏢 Site</h2>${[['Code affaire',site?.codeAffaire],['Nom',site?.name],['Adresse',[site?.address,site?.zip,site?.city].filter(Boolean).join(', ')],['Période',site?.anneeExacte?String(site.anneeExacte):site?.periode],['Logements',site?.logements],['Hauteur stat.',site?.hauteur?site.hauteur+' m':null],['Emplacement',site?.emplacement],['Énergie',site?.energie],['Contact',site?.contact]].filter(([,v])=>v).map(([l,v])=>`<div class="f"><span class="fl">${l}</span><span class="fv">${esc(String(v))}</span></div>`).join('')}</div>
 <div class="card"><h2>📋 Mission</h2><div class="f"><span class="fl">Type</span><span class="fv">${TL[mission?.type]||'—'}</span></div><div class="f"><span class="fl">Statut</span><span class="fv"><span class="badge b-${mission?.status}">${SL[mission?.status]||'—'}</span></span></div><div class="f"><span class="fl">Date</span><span class="fv">${mission?.dateStart||'—'}</span></div><div class="f"><span class="fl">Intervenant</span><span class="fv">${esc(mission?.operator||'—')}</span></div><div class="f"><span class="fl">Référence</span><span class="fv">${esc(mission?.ref||'—')}</span></div></div>
 </div>
 ${inclEq&&mEqs.length?`<h2 style="font-size:10px;letter-spacing:1px;text-transform:uppercase;border-bottom:2px solid #1e7fd4;padding-bottom:4px;margin-bottom:7px">🔧 Équipements (${mEqs.length})</h2><table><thead><tr><th>Catégorie</th><th>Désignation</th><th>Marque</th><th>Modèle</th><th>N° Série</th><th>Année</th><th>Puissance</th><th>État</th></tr></thead><tbody>${eqRows}</tbody></table>`:''}
