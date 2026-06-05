@@ -18,7 +18,7 @@
 
 <div id="splash">
   <div class="splash-inner">
-    <img id="splash-logo" src="" alt="ADIA"/>
+    <div class="splash-brand">ADIATHERM</div>
     <div class="splash-title">ADIA<span>TOOL</span></div>
     <div class="splash-sub">Outil de visite technique</div>
     <div class="splash-loader"><div class="splash-bar"></div></div>
@@ -30,8 +30,8 @@
   <header>
     <div class="header-left">
       <button class="icon-btn back-btn hidden" id="btn-back">‹</button>
-      <img id="header-logo" src="" alt="ADIA" class="header-logo-img"/>
       <div>
+        <div class="header-brand">ADIATHERM</div>
         <div class="header-title" id="header-title">ADIA<span>TOOL</span></div>
         <div class="header-sub" id="header-sub">Tableau de bord</div>
       </div>
@@ -279,29 +279,52 @@
   <div class="modal-content">
     <div class="modal-header"><h2 id="modal-site-title">Nouveau site</h2><button class="modal-close" data-modal="modal-site">✕</button></div>
     <div class="modal-body">
+      <div class="form-section-title" style="margin-bottom:6px">IDENTIFICATION</div>
       <div class="form-group"><label>Nom *</label><input type="text" id="site-name" placeholder="Résidence Les Acacias"/></div>
-      <div class="form-group"><label>Code affaire</label><input type="text" id="site-code-affaire" placeholder="EX: 2024-001"/></div>
+      <div class="form-group"><label>Code affaire</label><input type="text" id="site-code-affaire" placeholder="Ex: 2024-001"/></div>
       <div class="form-group"><label>Adresse</label><input type="text" id="site-address"/></div>
       <div class="form-row">
         <div class="form-group"><label>Code postal</label><input type="text" id="site-zip"/></div>
         <div class="form-group"><label>Ville</label><input type="text" id="site-city"/></div>
       </div>
-      <div class="form-group"><label>Type de construction</label>
-        <select id="site-construction"><option value="classique">Classique</option><option value="haussmannien">Haussmannien</option><option value="recent">Récent</option><option value="industriel">Industriel</option><option value="autre">Autre</option></select>
+      <div class="form-group"><label>Contact / Gestionnaire</label><input type="text" id="site-contact"/></div>
+      <div class="form-section-title" style="margin:8px 0 6px">BÂTIMENT</div>
+      <div class="form-group"><label>Année / période de construction</label>
+        <select id="site-periode">
+          <option value="">— Sélectionner —</option>
+          <option value="Avant 1948">Avant 1948</option>
+          <option value="1948–1974">1948–1974</option>
+          <option value="1975–1989">1975–1989</option>
+          <option value="1990–2000">1990–2000</option>
+          <option value="2001–2012">2001–2012</option>
+          <option value="Après 2012">Après 2012</option>
+        </select>
       </div>
+      <div class="form-group"><label>Année exacte (si connue)</label><input type="number" id="site-annee-exacte" placeholder="1982" min="1800" max="2099"/></div>
       <div class="form-row">
         <div class="form-group"><label>Nb bâtiments</label><input type="number" id="site-batiments" min="1"/></div>
         <div class="form-group"><label>Nb niveaux</label><input type="number" id="site-niveaux"/></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Nb logements</label><input type="number" id="site-logements"/></div>
-        <div class="form-group"><label>Hauteur statique (m)</label><input type="number" id="site-hauteur"/></div>
+        <div class="form-group"><label>Dont locaux pro</label><input type="number" id="site-locaux-pro"/></div>
       </div>
-      <div class="form-group"><label>Emplacement chaufferie</label><input type="text" id="site-emplacement" placeholder="Sous-sol -1"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Hauteur statique (m)</label><input type="number" id="site-hauteur" step="0.5"/></div>
+        <div class="form-group"><label>Nb logements/bât.</label><input type="number" id="site-logt-bat"/></div>
+      </div>
+      <div class="form-section-title" style="margin:8px 0 6px">INSTALLATION</div>
+      <div class="form-group"><label>Emplacement chaufferie</label><input type="text" id="site-emplacement" placeholder="Ex: Sous-sol niveau -1"/></div>
       <div class="form-group"><label>Énergie principale</label>
-        <select id="site-energie"><option value="Gaz naturel">Gaz naturel</option><option value="Fioul">Fioul</option><option value="CPCU / Réseau chaleur">CPCU / Réseau chaleur</option><option value="Pompe à chaleur">Pompe à chaleur</option><option value="Électrique">Électrique</option><option value="Autre">Autre</option></select>
+        <select id="site-energie">
+          <option value="Gaz naturel">Gaz naturel</option>
+          <option value="Fioul">Fioul</option>
+          <option value="CPCU / Réseau chaleur">CPCU / Réseau chaleur</option>
+          <option value="Pompe à chaleur">Pompe à chaleur</option>
+          <option value="Électrique">Électrique</option>
+          <option value="Autre">Autre</option>
+        </select>
       </div>
-      <div class="form-group"><label>Contact / Gestionnaire</label><input type="text" id="site-contact"/></div>
       <div class="form-group"><label>Notes</label><textarea id="site-notes" rows="2"></textarea></div>
     </div>
     <div class="modal-footer">

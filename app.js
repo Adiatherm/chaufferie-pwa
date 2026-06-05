@@ -46,10 +46,7 @@ async function init(){
   const catCfg=await dbGet('config','categories');categories=catCfg?catCfg.value:[...DEFAULT_CATEGORIES];
   const keyCfg=await dbGet('config','geminiKey');geminiKey=keyCfg?keyCfg.value:'';
   [sites,missions,equipments,formDataStore]=await Promise.all([dbGetAll('sites'),dbGetAll('missions'),dbGetAll('equipments'),dbGetAll('formdata')]);
-  // Apply logo
-  const logoEl1=document.getElementById('splash-logo');
-  const logoEl2=document.getElementById('header-logo');
-  if(logoEl1&&typeof LOGO_URI!=='undefined'){logoEl1.src=LOGO_URI;logoEl2.src=LOGO_URI;}
+  // Logo is now pure CSS text — no image needed
   setupEvents();
   updateNet();
   window.addEventListener('online',updateNet);window.addEventListener('offline',updateNet);
