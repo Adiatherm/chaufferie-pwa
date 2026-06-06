@@ -49,7 +49,6 @@ async function init(){
   [sites,missions,equipments,formDataStore,users]=await Promise.all([
     dbGetAll('sites'),dbGetAll('missions'),dbGetAll('equipments'),dbGetAll('formdata'),dbGetAll('users')
   ]);
-  document.getElementById('splash-brand').textContent='ADIATHERM';
   setupEvents();updateNet();
   window.addEventListener('online',updateNet);window.addEventListener('offline',updateNet);
   await sleep(1900);
@@ -134,8 +133,8 @@ function setupEvents(){
   document.getElementById('site-search').addEventListener('input',e=>renderSites(e.target.value));
   document.getElementById('mission-search-all').addEventListener('input',renderAllMissions);
   document.getElementById('mission-filter-status').addEventListener('change',renderAllMissions);
-  document.getElementById('eq-search')?.addEventListener('input',renderSynthesis);
-  document.getElementById('eq-filter-cat')?.addEventListener('change',renderSynthesis);
+  document.getElementById('eq-search')?.addEventListener('input',()=>renderSynthesis());
+  document.getElementById('eq-filter-cat')?.addEventListener('change',()=>renderSynthesis());
   document.getElementById('btn-add-site').addEventListener('click',()=>openSiteModal());
   document.getElementById('btn-add-mission').addEventListener('click',()=>openMissionModal());
   document.querySelectorAll('.modal-close,[data-modal]').forEach(btn=>{
