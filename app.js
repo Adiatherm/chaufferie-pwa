@@ -286,43 +286,64 @@ function renderSynthesis(){
   const list=document.getElementById('mission-eq-list');
   if(!list)return;
   const mEqs=equipments.filter(e=>e.missionId===currentMissionId);
-  // Group by moduleId
+  if(!mEqs.length){list.innerHTML=`<div class="empty-state"><div class="empty-icon">🔧</div><p>Aucun matériel enregistré.<br>Ajoutez des équipements depuis les modules Relevés.</p></div>`;return;}
+
+  // Group by BASE moduleId (without index suffix)
   const groups={};
   mEqs.forEach(eq=>{
-    const g=eq.moduleId||'__global';
+    const g=(eq.moduleId||'__global').replace(/_\d+$/,'');
     if(!groups[g])groups[g]=[];
     groups[g].push(eq);
   });
+
   const moduleOrder=['primaire','chauffage','ecs','autres_materiels'];
   list.innerHTML='';
-  if(!mEqs.length){list.innerHTML=`<div class="empty-state"><div class="empty-icon">🔧</div><p>Aucun matériel enregistré.<br>Ajoutez des équipements depuis les modules Relevés.</p></div>`;return;}
+
+  const CL2={bon:'✅ Bon état',correct:'🔵 Correct',degrade:'⚠️ Dégradé',hs:'❌ Hors service'};
+
+  const renderEqCard=(eq,container)=>{
+    const cat=categories.find(c=>c.id===eq.category)||{name:eq.category||'—',color:'#6b7280'};
+    const card=document.createElement('div');card.className='eq-card';card.style.setProperty('--cat-color',cat.color);
+    const meta=[eq.brand,eq.model,eq.year?`(${eq.year})`:''].filter(Boolean).join(' ');
+    const details=[
+      eq.power?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--accent2)">${esc(eq.power)}</span>`:'',
+      eq.fluid?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">${esc(eq.fluid)}</span>`:'',
+      eq.serial?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">SN:${esc(eq.serial)}</span>`:'',
+    ].filter(Boolean).join(' ');
+    card.innerHTML=`
+      <div class="card-header">
+        <span class="badge" style="color:${cat.color};border-color:${cat.color}40">${esc(cat.name.toUpperCase())}</span>
+        <div class="card-actions">
+          <button class="card-btn" data-id="${eq.id}" data-action="edit">✏️</button>
+          <button class="card-btn" data-id="${eq.id}" data-action="delete">🗑️</button>
+        </div>
+      </div>
+      <div class="card-title" style="margin-bottom:2px">${esc(eq.name||'—')}</div>
+      ${meta?`<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-bottom:3px">${esc(meta)}</div>`:''}
+      ${details?`<div style="display:flex;gap:6px;flex-wrap:wrap">${details}</div>`:''}
+      ${eq.condition?`<div style="font-family:var(--font-mono);font-size:10px;margin-top:4px">${CL2[eq.condition]||eq.condition}</div>`:''}
+      ${eq.notes?`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;font-style:italic">${esc(eq.notes.slice(0,80))}${eq.notes.length>80?'…':''}</div>`:''}`;
+    card.addEventListener('click',e=>{const btn=e.target.closest('[data-action]');if(!btn){openEqModal(eq.id);return;}if(btn.dataset.action==='edit')openEqModal(eq.id);else deleteEquipment(eq.id);});
+    container.appendChild(card);
+  };
+
   moduleOrder.forEach(modId=>{
-    if(!groups[modId]?.length)return;
+    const grpEqs=(groups[modId]||[]).filter(eq=>!search||(eq.name||'').toLowerCase().includes(search)||(eq.brand||'').toLowerCase().includes(search)||(eq.model||'').toLowerCase().includes(search));
+    if(!grpEqs.length)return;
     const mod=FORM_MODULES.find(m=>m.id===modId);
     const sec=document.createElement('div');
-    sec.innerHTML=`<div style="font-family:var(--font-mono);font-size:10px;letter-spacing:1.5px;color:${mod?.color||'var(--accent)'};text-transform:uppercase;padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px">${mod?.icon||''} ${mod?.label||modId}</div>`;
+    sec.innerHTML=`<div style="font-family:var(--font-mono);font-size:10px;letter-spacing:1.5px;color:${mod?.color||'var(--accent)'};text-transform:uppercase;padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px">${mod?.icon||''} ${mod?.label||modId} <span style="color:var(--text-muted)">(${grpEqs.length})</span></div>`;
     list.appendChild(sec);
-    let filtered=groups[modId].filter(eq=>!search||(eq.name||'').toLowerCase().includes(search)||(eq.brand||'').toLowerCase().includes(search));
-    filtered.forEach(eq=>{
-      const cat=categories.find(c=>c.id===eq.category)||{name:eq.category,color:'#6b7280'};
-      const card=document.createElement('div');card.className='eq-card';card.style.setProperty('--cat-color',cat.color);
-      card.innerHTML=`<div class="card-header"><span class="badge" style="color:${cat.color};border-color:${cat.color}40">${esc(cat.name.toUpperCase())}</span><div class="card-actions"><button class="card-btn" data-id="${eq.id}" data-action="edit">✏️</button><button class="card-btn" data-id="${eq.id}" data-action="delete">🗑️</button></div></div><div class="card-title">${esc(eq.name||'—')}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">${eq.brand?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${esc(eq.brand)}</span>`:''} ${eq.model?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)">${esc(eq.model)}</span>`:''} ${eq.serial?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">SN:${esc(eq.serial)}</span>`:''} ${eq.power?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--accent2)">${esc(eq.power)}</span>`:''}</div>${eq.condition?`<div style="font-family:var(--font-mono);font-size:10px;margin-top:3px" class="cond-${eq.condition}">${{bon:'Bon état',correct:'Correct',degrade:'Dégradé',hs:'Hors service'}[eq.condition]}</div>`:''}`;
-      card.addEventListener('click',e=>{const btn=e.target.closest('[data-action]');if(!btn){openEqModal(eq.id);return;}if(btn.dataset.action==='edit')openEqModal(eq.id);else deleteEquipment(eq.id);});
-      list.appendChild(card);
-    });
+    grpEqs.forEach(eq=>renderEqCard(eq,list));
   });
-  // Global (no module)
-  if(groups['__global']?.length){
+
+  // Others (no module or unknown)
+  const otherEqs=(groups['__global']||[]).filter(eq=>!search||(eq.name||'').toLowerCase().includes(search));
+  if(otherEqs.length){
     const sec=document.createElement('div');
-    sec.innerHTML=`<div style="font-family:var(--font-mono);font-size:10px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px">Autres</div>`;
+    sec.innerHTML=`<div style="font-family:var(--font-mono);font-size:10px;letter-spacing:1.5px;color:var(--text-muted);text-transform:uppercase;padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px">Autres matériels</div>`;
     list.appendChild(sec);
-    groups['__global'].forEach(eq=>{
-      const cat=categories.find(c=>c.id===eq.category)||{name:eq.category,color:'#6b7280'};
-      const card=document.createElement('div');card.className='eq-card';card.style.setProperty('--cat-color',cat.color);
-      card.innerHTML=`<div class="card-header"><span class="badge" style="color:${cat.color}">${esc(cat.name.toUpperCase())}</span><div class="card-actions"><button class="card-btn" data-id="${eq.id}" data-action="edit">✏️</button><button class="card-btn" data-id="${eq.id}" data-action="delete">🗑️</button></div></div><div class="card-title">${esc(eq.name||'—')}</div>`;
-      card.addEventListener('click',e=>{const btn=e.target.closest('[data-action]');if(!btn)return;if(btn.dataset.action==='edit')openEqModal(eq.id);else deleteEquipment(eq.id);});
-      list.appendChild(card);
-    });
+    otherEqs.forEach(eq=>renderEqCard(eq,list));
   }
 }
 function renderCatFilter(){
@@ -430,7 +451,14 @@ function renderLocauxSetup(locaux,fd){
 
 function renderFormBlock(mod,fd,container,saveFn=null,localType='',energie=''){
   const block=document.createElement('div');block.className='form-block';
-  block.innerHTML=`<div class="form-block-header"><div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div></div>`;
+  block.innerHTML=`<div class="form-block-header" style="cursor:pointer" data-collapse="false"><div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" title="Réduire/Agrandir" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:0 4px;line-height:1">−</button></div>`;
+  block.querySelector('.form-block-header').addEventListener('click',function(){
+    const isCollapsed=this.dataset.collapse==='true';
+    this.dataset.collapse=!isCollapsed;
+    const bodyEl=this.nextElementSibling;
+    if(bodyEl){bodyEl.style.display=isCollapsed?'':'none';}
+    this.querySelector('.collapse-btn').textContent=isCollapsed?'−':'+';
+  });
   const body=document.createElement('div');body.className='form-block-body';block.appendChild(body);container.appendChild(block);
 
   // Equipment inline at top for modules with hasEquipment
@@ -455,6 +483,7 @@ function renderField(field,data,body,mod,fd,iIdx=null,saveFn=null,localType='',e
     const d=document.createElement('div');d.className='form-section-title';d.textContent=field.label.replace(/^—\s*/,'').replace(/\s*—$/,'');body.appendChild(d);return;
   }
   if(field.type==='equipment_inline'){body.appendChild(document.createElement('div'));return;} // handled above
+  if(field.type==='mesures_libres'){renderMesuresLibres(field,data,body,mod,fd,iIdx,saveFn);return;}
   if(field.type==='mesures_temp'){renderMesuresTemp(field,data,body,mod,fd,iIdx,saveFn);return;}
   if(field.type==='mesures_chauf'){renderMesuresChauf(field,data,body,mod,fd,iIdx,saveFn);return;}
   if(field.type==='courbe_chauffe'){renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn);return;}
@@ -590,6 +619,34 @@ async function analyzeImageForModule(dataURL){
   if(result)prefillModal(result);
 }
 
+// ── MESURES LIBRES (accès + mesures supplémentaires dynamiques) ──────
+function renderMesuresLibres(field,data,body,mod,fd,iIdx,saveFn){
+  const block=document.createElement('div');
+  const getCurrentPoints=async()=>{const fdd=getMFD();return(fdd.data[mod.id]||{})[field.id]||[];};
+  const savePoints=async(pts)=>{const fdd=getMFD();if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;saveFn?await saveFn(fdd):await saveMFD(fdd);};
+  const renderPoints=(points)=>{
+    block.innerHTML='';
+    // Header row
+    const hdr=document.createElement('div');
+    hdr.style.cssText='display:grid;grid-template-columns:1fr 1fr 60px 28px;gap:6px;margin-bottom:4px';
+    hdr.innerHTML='<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Libellé</span><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Valeur</span><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Unité</span><span></span>';
+    if(points.length)block.appendChild(hdr);
+    points.forEach((pt,pi)=>{
+      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:1fr 1fr 60px 28px;gap:6px;align-items:center;margin-bottom:5px';
+      const iStyle='background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%';
+      row.innerHTML=`<input type="text" class="ml-label" value="${esc(pt.label||'')}" placeholder="Ex: Ø cheminée" style="${iStyle}"/><input type="text" class="ml-val" value="${esc(pt.val||'')}" placeholder="Valeur" style="${iStyle}"/><input type="text" class="ml-unit" value="${esc(pt.unit||'')}" placeholder="cm" style="${iStyle}"/><button class="mesure-del" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px">✕</button>`;
+      const save=async()=>{const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));if(!pts2[pi])pts2[pi]={};pts2[pi].label=row.querySelector('.ml-label').value;pts2[pi].val=row.querySelector('.ml-val').value;pts2[pi].unit=row.querySelector('.ml-unit').value;await savePoints(pts2);};
+      row.querySelectorAll('input').forEach(el=>el.addEventListener('change',save));
+      row.querySelector('.mesure-del').addEventListener('click',async()=>{const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));pts2.splice(pi,1);await savePoints(pts2);renderPoints(pts2);});
+      block.appendChild(row);
+    });
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter une mesure';
+    addBtn.addEventListener('click',async()=>{const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));pts2.push({label:'',val:'',unit:''});await savePoints(pts2);renderPoints(pts2);});
+    block.appendChild(addBtn);
+  };
+  renderPoints((fd.data[mod.id]||{})[field.id]||[]);body.appendChild(block);
+}
+
 // ── MESURES TEMP (circuit primaire) ──────────────────────────────
 function renderMesuresTemp(field,data,body,mod,fd,iIdx,saveFn){
   const key=iIdx!==null?`${field.id}_${iIdx}`:field.id;
@@ -644,10 +701,108 @@ function renderMesuresTemp(field,data,body,mod,fd,iIdx,saveFn){
   renderPoints(stored);body.appendChild(block);
 }
 
-// ── MESURES CHAUFFAGE ─────────────────────────────────────────────
+// ── MESURES CHAUFFAGE (dynamiques avec sous-champs selon type) ──────
 function renderMesuresChauf(field,data,body,mod,fd,iIdx,saveFn){
-  // Reuse mesures_temp with different options and pressure/flow handling
-  renderMesuresTemp({...field,type:'mesures_temp'},data,body,mod,fd,iIdx,saveFn);
+  const key=iIdx!==null?`${field.id}_${iIdx}`:field.id;
+  const stored=iIdx!==null?((fd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fd.data[mod.id]||{})[field.id]||[];
+  const block=document.createElement('div');
+
+  const savePoints=async(pts)=>{
+    const fdd=getMFD();
+    if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
+    else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
+    saveFn?await saveFn(fdd):await saveMFD(fdd);
+  };
+
+  const renderPoints=(points)=>{
+    block.innerHTML='';
+    points.forEach((pt,pi)=>{
+      const row=document.createElement('div');row.className='mesure-point';
+      const isTempReseau=pt.type==='Températures réseau';
+      const isPression=pt.type==='Pression pompe';
+      const isDebit=pt.type==='Débit';
+      const isAutre=pt.type==='Autre';
+
+      let subFields='';
+      if(isTempReseau){
+        subFields=`<div class="mesure-row">
+          <div class="mesure-cell"><label>Départ (°C)</label><input type="number" class="mc-dep" step="0.1" value="${pt.dep||''}"/></div>
+          <div class="mesure-cell"><label>Retour (°C)</label><input type="number" class="mc-ret" step="0.1" value="${pt.ret||''}"/></div>
+          <div class="mesure-cell"><label>ΔT</label><div class="mesure-delta" id="mcd-${key}-${pi}">—</div></div>
+        </div>`;
+      } else if(isPression){
+        subFields=`<div class="mesure-row">
+          <div class="mesure-cell"><label>Aspiration (bar)</label><input type="number" class="mc-asp" step="0.01" value="${pt.asp||''}"/></div>
+          <div class="mesure-cell"><label>Refoulement (bar)</label><input type="number" class="mc-ref" step="0.01" value="${pt.ref||''}"/></div>
+          <div class="mesure-cell"><label>ΔP</label><div class="mesure-delta" id="mcd-${key}-${pi}">—</div></div>
+        </div>`;
+      } else if(isDebit){
+        subFields=`<div class="mesure-row"><div class="mesure-cell" style="grid-column:1/-1"><label>Débit (m³/h)</label><input type="number" class="mc-debit" step="0.01" value="${pt.debit||''}"/></div></div>`;
+      } else if(isAutre){
+        subFields=`<div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
+          <input type="text" class="mc-libelle" placeholder="Libellé du point" value="${esc(pt.libelle||'')}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%"/>
+          <div style="display:flex;gap:6px"><input type="text" class="mc-val" placeholder="Valeur" value="${esc(pt.val||'')}" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none"/>
+          <input type="text" class="mc-unite" placeholder="Unité" value="${esc(pt.unite||'')}" style="width:70px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none"/></div>
+        </div>`;
+      } else {
+        // Temp ext reg / temp ext réelle (simple value)
+        subFields=`<div class="mesure-row"><div class="mesure-cell" style="grid-column:1/-1"><label>Valeur (°C)</label><input type="number" class="mc-val" step="0.1" value="${pt.val||''}"/></div></div>`;
+      }
+
+      row.innerHTML=`<div class="mesure-point-header">
+        <select class="mesure-point-type">${(field.pointOptions||[]).map(o=>`<option value="${esc(o)}"${pt.type===o?' selected':''}>${esc(o)}</option>`).join('')}</select>
+        <button class="mesure-del">✕</button>
+      </div>${subFields}`;
+
+      // Auto-compute ΔT or ΔP
+      const updateDelta=()=>{
+        const dtEl=document.getElementById(`mcd-${key}-${pi}`);if(!dtEl)return;
+        if(isTempReseau){const d=parseFloat(row.querySelector('.mc-dep')?.value),r=parseFloat(row.querySelector('.mc-ret')?.value);dtEl.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' K':'—';}
+        else if(isPression){const a=parseFloat(row.querySelector('.mc-asp')?.value),r=parseFloat(row.querySelector('.mc-ref')?.value);dtEl.textContent=(!isNaN(a)&&!isNaN(r))?(r-a).toFixed(2)+' bar':'—';}
+      };
+      row.querySelectorAll('input').forEach(el=>el.addEventListener('input',updateDelta));
+
+      const saveRow=async()=>{
+        const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
+        if(!pts2[pi])pts2[pi]={};
+        pts2[pi].type=row.querySelector('.mesure-point-type').value;
+        if(isTempReseau){pts2[pi].dep=row.querySelector('.mc-dep')?.value;pts2[pi].ret=row.querySelector('.mc-ret')?.value;}
+        else if(isPression){pts2[pi].asp=row.querySelector('.mc-asp')?.value;pts2[pi].ref=row.querySelector('.mc-ref')?.value;}
+        else if(isDebit){pts2[pi].debit=row.querySelector('.mc-debit')?.value;}
+        else if(isAutre){pts2[pi].libelle=row.querySelector('.mc-libelle')?.value;pts2[pi].val=row.querySelector('.mc-val')?.value;pts2[pi].unite=row.querySelector('.mc-unite')?.value;}
+        else{pts2[pi].val=row.querySelector('.mc-val')?.value;}
+        await savePoints(pts2);
+      };
+      row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',saveRow));
+
+      row.querySelector('.mesure-point-type').addEventListener('change',async()=>{
+        const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
+        pts2[pi]={type:row.querySelector('.mesure-point-type').value};
+        await savePoints(pts2);renderPoints(pts2);
+      });
+      row.querySelector('.mesure-del').addEventListener('click',async()=>{
+        const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
+        pts2.splice(pi,1);await savePoints(pts2);renderPoints(pts2);
+      });
+
+      updateDelta();block.appendChild(row);
+    });
+
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter un point de mesure';
+    addBtn.addEventListener('click',async()=>{
+      const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
+      pts2.push({type:(field.pointOptions||[])[0]||''});
+      await savePoints(pts2);renderPoints(pts2);
+    });
+    block.appendChild(addBtn);
+  };
+
+  const getCurrentPoints=async()=>{
+    const fdd=getMFD();
+    return iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
+  };
+
+  renderPoints(stored);body.appendChild(block);
 }
 
 // ── COURBE DE CHAUFFE ─────────────────────────────────────────────
@@ -688,27 +843,41 @@ function renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn){
     const py=d=>H-PAD.b-(d-y0)/(y1-y0)*(H-PAD.t-PAD.b);
     // Grid & axes
     ctx.strokeStyle='#1e3f5e';ctx.lineWidth=1;
-    // X grid ticks
-    const stepT=Math.ceil((x1-x0)/6);
+    // Fixed step: X by 5°C, Y by 10 or 20°C depending on range
+    const rangeT=x1-x0,rangeD=y1-y0;
+    const stepT=5; // always 5°C on X
+    const stepD=rangeD>100?20:10; // 20 if large range, else 10
+    // Ensure Y includes 0 if range allows
+    const yMin=Math.min(y0,0);const yMax=Math.max(y1,0);
+    const yStart=Math.floor(yMin/stepD)*stepD;
+    const yEnd=Math.ceil(yMax/stepD)*stepD;
+    // Recalc px/py with expanded range including 0
+    const px2=t=>PAD.l+(t-x0)/(x1-x0)*(W-PAD.l-PAD.r);
+    const py2=d=>H-PAD.b-(d-yStart)/(yEnd-yStart)*(H-PAD.t-PAD.b);
+    // Reassign px/py
+    Object.assign(window,{_px:px2,_py:py2});
+
+    // X grid ticks (by 5°C)
     for(let t=Math.ceil(x0/stepT)*stepT;t<=x1;t+=stepT){
-      ctx.beginPath();ctx.moveTo(px(t),PAD.t);ctx.lineTo(px(t),H-PAD.b);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(px2(t),PAD.t);ctx.lineTo(px2(t),H-PAD.b);ctx.stroke();
     }
     // Y grid ticks
-    const stepD=Math.ceil((y1-y0)/5);
-    for(let d=Math.ceil(y0/stepD)*stepD;d<=y1;d+=stepD){
-      ctx.beginPath();ctx.moveTo(PAD.l,py(d));ctx.lineTo(W-PAD.r,py(d));ctx.stroke();
+    for(let d=yStart;d<=yEnd;d+=stepD){
+      ctx.beginPath();ctx.moveTo(PAD.l,py2(d));ctx.lineTo(W-PAD.r,py2(d));ctx.stroke();
     }
     // Axes
     ctx.strokeStyle='#2d5a8e';ctx.lineWidth=1.5;
     ctx.beginPath();ctx.moveTo(PAD.l,PAD.t);ctx.lineTo(PAD.l,H-PAD.b);ctx.lineTo(W-PAD.r,H-PAD.b);ctx.stroke();
+    // Zero line on Y (prominent)
+    if(yStart<0&&yEnd>0){ctx.strokeStyle='#3b82f6';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(PAD.l,py2(0));ctx.lineTo(W-PAD.r,py2(0));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#3b82f6';ctx.font='9px monospace';ctx.textAlign='right';ctx.fillText('0°',PAD.l-4,py2(0)+3);}
     // Axis labels
     ctx.fillStyle='#6a90b0';ctx.font='10px monospace';ctx.textAlign='center';
     for(let t=Math.ceil(x0/stepT)*stepT;t<=x1;t+=stepT){
-      ctx.fillText(t+'°',px(t),H-PAD.b+12);
+      ctx.fillText(t+'°',px2(t),H-PAD.b+12);
     }
     ctx.textAlign='right';
-    for(let d=Math.ceil(y0/stepD)*stepD;d<=y1;d+=stepD){
-      ctx.fillText(d+'°',PAD.l-4,py(d)+3);
+    for(let d=yStart;d<=yEnd;d+=stepD){
+      ctx.fillText(d+'°',PAD.l-4,py2(d)+3);
     }
     // Axis titles
     ctx.fillStyle='#7a95b0';ctx.font='9px monospace';ctx.textAlign='center';
@@ -718,15 +887,17 @@ function renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn){
     // Zero line if visible
     if(x0<0&&x1>0){ctx.strokeStyle='#2d5a8e';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(px(0),PAD.t);ctx.lineTo(px(0),H-PAD.b);ctx.stroke();ctx.setLineDash([]);}
     // Curve
+    const pxF=window._px||px,pyF=window._py||py;
     ctx.strokeStyle='#1e7fd4';ctx.lineWidth=2.5;ctx.lineJoin='round';
-    ctx.beginPath();points.forEach((p,i)=>{i===0?ctx.moveTo(px(p.t),py(p.d)):ctx.lineTo(px(p.t),py(p.d));});ctx.stroke();
+    ctx.beginPath();points.forEach((p,i)=>{i===0?ctx.moveTo(pxF(p.t),pyF(p.d)):ctx.lineTo(pxF(p.t),pyF(p.d));});ctx.stroke();
     // Data points with labels
     points.forEach(p=>{
-      ctx.fillStyle='#1e7fd4';ctx.beginPath();ctx.arc(px(p.t),py(p.d),5,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='white';ctx.beginPath();ctx.arc(px(p.t),py(p.d),2,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#1e7fd4';ctx.beginPath();ctx.arc(pxF(p.t),pyF(p.d),5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='white';ctx.beginPath();ctx.arc(pxF(p.t),pyF(p.d),2,0,Math.PI*2);ctx.fill();
       ctx.fillStyle='#e8f0f8';ctx.font='9px monospace';ctx.textAlign='center';
-      ctx.fillText(p.d+'°',px(p.t),py(p.d)-8);
+      ctx.fillText(p.d+'°',pxF(p.t),pyF(p.d)-8);
     });
+    delete window._px;delete window._py;
   };
 
   const renderPts=(points)=>{
@@ -842,8 +1013,9 @@ function updateAllComputed(mod,fd,iIdx){
 function renderRepeatableBlock(mod,fd,container,saveFn=null,localType='',energie=''){
   const instances=fd.repeatData[mod.id]||[{}];
   const block=document.createElement('div');block.className='form-block';
-  const header=document.createElement('div');header.className='form-block-header';
-  header.innerHTML=`<div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div>`;
+  const header=document.createElement('div');header.className='form-block-header';header.style.cursor='pointer';header.dataset.collapse='false';
+  header.innerHTML=`<div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:0 4px;line-height:1">−</button>`;
+  header.addEventListener('click',function(){const isCollapsed=this.dataset.collapse==='true';this.dataset.collapse=!isCollapsed;if(body){body.style.display=isCollapsed?'':'none';}this.querySelector('.collapse-btn').textContent=isCollapsed?'−':'+';});
   block.appendChild(header);const body=document.createElement('div');body.className='form-block-body';block.appendChild(body);container.appendChild(block);
   instances.forEach((_,idx)=>{
     const inst=document.createElement('div');inst.className='repeat-instance';
@@ -1008,7 +1180,10 @@ function openEqModal(id=null,moduleId=null,photoData=null){
 }
 async function saveEquipment(){
   const name=document.getElementById('field-name').value.trim();if(!name){showToast('Nom obligatoire','error');return;}
-  const eq={id:editingEqId||uid(),missionId:currentMissionId,moduleId:editingEqContext||null,category:v('field-category'),name,brand:v('field-brand'),model:v('field-model'),serial:v('field-serial'),year:vn('field-year'),power:v('field-power'),fluid:v('field-fluid'),location:v('field-location'),condition:v('field-condition'),notes:v('field-notes'),ocrRaw:v('field-ocr-raw'),photo:attachedPhoto||null,updatedAt:now(),createdAt:editingEqId?(equipments.find(e=>e.id===editingEqId)?.createdAt||now()):now()};
+  // Normalize moduleId: strip circuit index suffix (e.g. 'chauffage_0' -> 'chauffage')
+  const rawModId=editingEqContext||null;
+  const baseModId=rawModId?rawModId.replace(/_\d+$/,''):null;
+  const eq={id:editingEqId||uid(),missionId:currentMissionId,moduleId:baseModId,moduleContext:rawModId,category:v('field-category'),name,brand:v('field-brand'),model:v('field-model'),serial:v('field-serial'),year:vn('field-year'),power:v('field-power'),fluid:v('field-fluid'),location:v('field-location'),condition:v('field-condition'),notes:v('field-notes'),ocrRaw:v('field-ocr-raw'),photo:attachedPhoto||null,updatedAt:now(),createdAt:editingEqId?(equipments.find(e=>e.id===editingEqId)?.createdAt||now()):now()};
   await dbPut('equipments',eq);if(editingEqId){const i=equipments.findIndex(e=>e.id===editingEqId);if(i>=0)equipments[i]=eq;else equipments.push(eq);}else equipments.push(eq);
   capturedImage=null;document.getElementById('modal-equipment').classList.add('hidden');
   renderFormsZone();showToast(editingEqId?'Équipement mis à jour ✓':'Équipement ajouté ✓','success');
