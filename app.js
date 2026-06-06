@@ -27,8 +27,10 @@ const dbDel=(s,k)=>new Promise((r,j)=>{const q=txs(s,'readwrite').delete(k);q.on
 // ── STATE ─────────────────────────────────────────────────────────
 let sites=[],missions=[],equipments=[],formDataStore=[],categories=[],users=[],currentUser=null,geminiKey='';
 let currentSiteId=null,currentMissionId=null;
+const collapseState=new Map(); // blockId -> bool (true=collapsed)
 let editingSiteId=null,editingMissionId=null,editingEqId=null,editingEqContext=null;
 let capturedImage=null,attachedPhoto=null,cameraStream=null,notesSaveTimer=null;
+let currentLocalType='',currentEnergie='';
 
 const DEFAULT_CATEGORIES=[
   {id:'chaudiere',name:'Chaudière',color:'#f97316'},{id:'bruleur',name:'Brûleur',color:'#ef4444'},
@@ -384,7 +386,7 @@ function renderFormsZone(){
   const localKey=`local_${activeLocal}`;
   const activeModules=fd.localModules?.[localKey]||[];
   const site=sites.find(s=>s.id===currentSiteId);
-  const energie=site?.energie||'';
+  const energie=site?.energie||'';currentEnergie=energie;
   modulesSel.innerHTML='<h3 style="font-family:var(--font-display);font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text-secondary)">Modules pour ce local</h3><div class="module-toggles" id="module-toggles"></div>';
   const grid=document.getElementById('module-toggles');
   FORM_MODULES.forEach(mod=>{
@@ -406,12 +408,23 @@ function renderFormsZone(){
   const localSave=async(fdd)=>{
     const mainFdd=getMFD();
     if(!mainFdd.localData)mainFdd.localData={};
-    // Deep merge — preserve other local data
-    const existing=mainFdd.localData[localKey]||{};
-    mainFdd.localData[localKey]={...existing,data:fdd.data,repeatData:fdd.repeatData,comments:fdd.comments||{},cahierYears:fdd.cahierYears||{}};
+    const existing=mainFdd.localData[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
+    // Deep merge each key to avoid overwriting sibling module data
+    const mergedData={};
+    Object.assign(mergedData,existing.data||{});
+    Object.keys(fdd.data||{}).forEach(k=>{mergedData[k]={...((existing.data||{})[k]||{}),...(fdd.data[k]||{})};});
+    const mergedRepeat={};
+    Object.assign(mergedRepeat,existing.repeatData||{});
+    Object.keys(fdd.repeatData||{}).forEach(k=>{mergedRepeat[k]=fdd.repeatData[k];});
+    mainFdd.localData[localKey]={
+      data:mergedData,
+      repeatData:mergedRepeat,
+      comments:{...(existing.comments||{}),...(fdd.comments||{})},
+      cahierYears:{...(existing.cahierYears||{}),...(fdd.cahierYears||{})},
+    };
     await saveMFD(mainFdd);
   };
-  const localType=locaux[activeLocal]?.type||'';
+  const localType=locaux[activeLocal]?.type||'';currentLocalType=localType;
   activeModules.forEach(modId=>{
     const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
     if(mod.multiYear)renderCahierBlock(mod,localFd,formsContainer,localSave);
@@ -452,13 +465,22 @@ function renderLocauxSetup(locaux,fd){
 function renderFormBlock(mod,fd,container,saveFn=null,localType='',energie=''){
   const block=document.createElement('div');block.className='form-block';
   block.innerHTML=`<div class="form-block-header" style="cursor:pointer" data-collapse="false"><div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" title="Réduire/Agrandir" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:0 4px;line-height:1">−</button></div>`;
+  const blockId=`${mod.id}_${currentMissionId}`;
+  const initCollapsed=collapseState.get(blockId)||false;
   block.querySelector('.form-block-header').addEventListener('click',function(){
-    const isCollapsed=this.dataset.collapse==='true';
-    this.dataset.collapse=!isCollapsed;
     const bodyEl=this.nextElementSibling;
+    const isCollapsed=bodyEl?.style.display==='none';
+    collapseState.set(blockId,!isCollapsed);
     if(bodyEl){bodyEl.style.display=isCollapsed?'':'none';}
     this.querySelector('.collapse-btn').textContent=isCollapsed?'−':'+';
   });
+  // Apply saved collapse state
+  if(initCollapsed){
+    const bodyEl=block.querySelector('.form-block-body');
+    if(bodyEl)bodyEl.style.display='none';
+    const btn=block.querySelector('.collapse-btn');
+    if(btn)btn.textContent='+';
+  }
   const body=document.createElement('div');body.className='form-block-body';block.appendChild(body);container.appendChild(block);
 
   // Equipment inline at top for modules with hasEquipment
@@ -501,10 +523,13 @@ function renderField(field,data,body,mod,fd,iIdx=null,saveFn=null,localType='',e
     opts.forEach(([lbl,code,cls])=>{
       const btn=document.createElement('button');btn.className=(is4?'yesno4-btn':'yesno-btn')+' '+cls+(storedVal===code?' active':'');btn.textContent=lbl;
       btn.addEventListener('click',async()=>{
-        const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=code;}
-        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=code;}
-        saveFn?await saveFn(fdd):await saveMFD(fdd);
+        const fdd=getMFD();
+        const lk=`local_${fdd.activeLocalIdx||0}`;
+        const ld=(fdd.localData||{})[lk]||{data:{},repeatData:{}};
+        const target=saveFn?{...fdd,data:JSON.parse(JSON.stringify(ld.data)),repeatData:JSON.parse(JSON.stringify(ld.repeatData))}:fdd;
+        if(iIdx!==null){if(!target.repeatData[mod.id])target.repeatData[mod.id]=[];if(!target.repeatData[mod.id][iIdx])target.repeatData[mod.id][iIdx]={};target.repeatData[mod.id][iIdx][field.id]=code;}
+        else{if(!target.data[mod.id])target.data[mod.id]={};target.data[mod.id][field.id]=code;}
+        saveFn?await saveFn(target):await saveMFD(target);
         grp.querySelectorAll(is4?'.yesno4-btn':'.yesno-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
         if(field.conditional){const condDiv=document.getElementById('cond-'+key);if(condDiv)condDiv.style.display=code===field.conditional.showWhen.value?'flex':'none';}
       });
@@ -528,10 +553,22 @@ function renderField(field,data,body,mod,fd,iIdx=null,saveFn=null,localType='',e
     else wrap.innerHTML=`<label>${esc(field.label)}</label><input type="${field.type==='number'?'number':field.type==='date'?'date':field.type==='time'?'time':'text'}" id="ff-${key}" placeholder="${esc(field.placeholder||field.label)}" value="${esc(val)}" ${field.step?'step='+field.step:''}/>`;
     const el=wrap.querySelector(`#ff-${key}`);
     if(el)el.addEventListener('change',async()=>{
-      const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-      if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=el.value;}
-      else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=el.value;}
-      saveFn?await saveFn(fdd):await saveMFD(fdd);updateAllComputed(mod,fd,iIdx);
+      // Always use fresh getMFD() to avoid stale snapshot overwriting other fields
+      const fdd=getMFD();
+      if(saveFn){
+        // Merge with current localData before saving
+        const lk=`local_${fdd.activeLocalIdx||0}`;
+        const ld=(fdd.localData||{})[lk]||{data:{},repeatData:{}};
+        const fddLocal={...fdd,data:{...ld.data},repeatData:{...ld.repeatData}};
+        if(iIdx!==null){if(!fddLocal.repeatData[mod.id])fddLocal.repeatData[mod.id]=[];if(!fddLocal.repeatData[mod.id][iIdx])fddLocal.repeatData[mod.id][iIdx]={};fddLocal.repeatData[mod.id][iIdx][field.id]=el.value;}
+        else{if(!fddLocal.data[mod.id])fddLocal.data[mod.id]={};fddLocal.data[mod.id][field.id]=el.value;}
+        await saveFn(fddLocal);
+      } else {
+        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=el.value;}
+        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=el.value;}
+        await saveMFD(fdd);
+      }
+      updateAllComputed(mod,fd,iIdx);
     });
   }
   body.appendChild(wrap);
@@ -821,10 +858,14 @@ function renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn){
     ctx.fillStyle='#0d1b2a';ctx.fillRect(0,0,W,H);
     const pts=block.querySelectorAll('.courbe-point-row');
     const points=[];
+    // Get decalage value from the stepper
+    let decalage=0;
+    const decalageEl=block.closest('.form-block-body')?.querySelector('.stepper-val');
+    if(decalageEl)decalage=parseFloat(decalageEl.textContent)||0;
     pts.forEach(row=>{
       const t=parseFloat(row.querySelector('.c-text').value);
       const d=parseFloat(row.querySelector('.c-dep').value);
-      if(!isNaN(t)&&!isNaN(d))points.push({t,d});
+      if(!isNaN(t)&&!isNaN(d))points.push({t,d:d+decalage}); // apply parallel shift
     });
     if(points.length<2){
       ctx.fillStyle='#445566';ctx.font='12px monospace';ctx.textAlign='center';
@@ -945,14 +986,20 @@ function renderDecalageStepper(field,data,body,mod,fd,iIdx,saveFn){
   const row=document.createElement('div');row.className='stepper-row';
   const minus=document.createElement('button');minus.className='stepper-btn';minus.textContent='−';
   const plus=document.createElement('button');plus.className='stepper-btn';plus.textContent='+';
+  display.textContent=(val>=0?'+':'')+val.toFixed(1);
   const display=document.createElement('div');display.className='stepper-val';display.textContent=val.toFixed(1);
   let current=val;
   const update=async(delta)=>{
-    current=Math.max(0,Math.min(10,Math.round((current+delta)*2)/2));
-    display.textContent=current.toFixed(1);
-    const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-    if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=current;
-    saveFn?await saveFn(fdd):await saveMFD(fdd);
+    current=Math.max(-10,Math.min(10,Math.round((current+delta)*2)/2));
+    display.textContent=(current>=0?'+':'')+current.toFixed(1);
+    const fdd=getMFD();
+    const lk=`local_${fdd.activeLocalIdx||0}`;const ld=(fdd.localData||{})[lk]||{data:{}};
+    const target=saveFn?{...fdd,data:JSON.parse(JSON.stringify(ld.data))}:fdd;
+    if(!target.data[mod.id])target.data[mod.id]={};target.data[mod.id][field.id]=current;
+    saveFn?await saveFn(target):await saveMFD(target);
+    // Trigger curve redraw if visible
+    const canvas=wrap.closest('.form-block-body')?.querySelector('.courbe-canvas');
+    if(canvas){const ev=new Event('redraw');canvas.dispatchEvent(ev);}
   };
   minus.addEventListener('click',()=>update(-0.5));plus.addEventListener('click',()=>update(0.5));
   row.appendChild(minus);row.appendChild(display);row.appendChild(plus);
@@ -1015,20 +1062,49 @@ function renderRepeatableBlock(mod,fd,container,saveFn=null,localType='',energie
   const block=document.createElement('div');block.className='form-block';
   const header=document.createElement('div');header.className='form-block-header';header.style.cursor='pointer';header.dataset.collapse='false';
   header.innerHTML=`<div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:0 4px;line-height:1">−</button>`;
-  header.addEventListener('click',function(){const isCollapsed=this.dataset.collapse==='true';this.dataset.collapse=!isCollapsed;if(body){body.style.display=isCollapsed?'':'none';}this.querySelector('.collapse-btn').textContent=isCollapsed?'−':'+';});
+  const repBlockId=`${mod.id}_rep_${currentMissionId}`;
+  const repInitCollapsed=collapseState.get(repBlockId)||false;
+  header.addEventListener('click',function(){
+    const isCollapsed=body?.style.display==='none';
+    collapseState.set(repBlockId,!isCollapsed);
+    if(body){body.style.display=isCollapsed?'':'none';}
+    this.querySelector('.collapse-btn').textContent=isCollapsed?'−':'+';
+  });
   block.appendChild(header);const body=document.createElement('div');body.className='form-block-body';block.appendChild(body);container.appendChild(block);
   instances.forEach((_,idx)=>{
     const inst=document.createElement('div');inst.className='repeat-instance';
     const instTitle=document.createElement('div');instTitle.className='repeat-instance-title';
     instTitle.innerHTML=`<span style="color:${mod.color}">${mod.repeatLabel} ${idx+1}</span>`;
-    if(instances.length>1){const del=document.createElement('button');del.className='btn-remove-instance';del.textContent='✕';del.addEventListener('click',async()=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];fdd.repeatData[mod.id].splice(idx,1);saveFn?await saveFn(fdd):await saveMFD(fdd);renderFormsZone();});instTitle.appendChild(del);}
+    if(instances.length>1){const del=document.createElement('button');del.className='btn-remove-instance';del.textContent='✕';del.addEventListener('click',async()=>{
+        const fdd=getMFD();
+        if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];
+        fdd.repeatData[mod.id].splice(idx,1);
+        saveFn?await saveFn(fdd):await saveMFD(fdd);
+        renderFormsZone();
+      });instTitle.appendChild(del);}
     inst.appendChild(instTitle);
     // Equipment inline for hasEquipment repeatable modules
     if(mod.hasEquipment)renderEquipmentInline(mod.id+`_${idx}`,inst,saveFn);
     mod.fields.forEach(f=>renderField(f,fd.data,inst,mod,fd,idx,saveFn,localType,energie));body.appendChild(inst);
   });
   const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.textContent=`+ Ajouter ${mod.repeatLabel}`;
-  addBtn.addEventListener('click',async()=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];fdd.repeatData[mod.id].push({});saveFn?await saveFn(fdd):await saveMFD(fdd);renderFormsZone();});
+  addBtn.addEventListener('click',async()=>{
+    // Always use fresh getMFD, never stale snapshot
+    const fdd=getMFD();
+    if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];
+    fdd.repeatData[mod.id].push({});
+    saveFn?await saveFn(fdd):await saveMFD(fdd);
+    // Re-render only this block, not the whole zone
+    const newFd=getMFD();
+    const localKey=`local_${newFd.activeLocalIdx||0}`;
+    const localDataEntry=(newFd.localData||{})[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
+    const freshFd={id:newFd.id,activeModules:newFd.localModules?.[localKey]||[],data:localDataEntry.data||{},repeatData:localDataEntry.repeatData||{},comments:localDataEntry.comments||{},cahierYears:localDataEntry.cahierYears||{}};
+    const freshSave=async(fdd2)=>{const mf=getMFD();if(!mf.localData)mf.localData={};const ex=mf.localData[localKey]||{};mf.localData[localKey]={...ex,data:fdd2.data,repeatData:fdd2.repeatData,comments:fdd2.comments||{},cahierYears:fdd2.cahierYears||{}};await saveMFD(mf);};
+    // Replace this block in DOM
+    const newBlock=document.createElement('div');
+    renderRepeatableBlock(mod,freshFd,newBlock,freshSave,currentLocalType||'',currentEnergie||'');
+    block.replaceWith(newBlock.firstChild||newBlock);
+  });
   body.appendChild(addBtn);
 }
 
