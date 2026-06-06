@@ -510,7 +510,7 @@ function renderField(field,data,body,mod,fd,iIdx=null,saveFn=null,localType='',e
 
 // ── EQUIPMENT INLINE ──────────────────────────────────────────────
 function renderEquipmentInline(moduleId,body,saveFn=null){
-  const block=document.createElement('div');block.className='equip-inline-block';
+  const block=document.createElement('div');block.className='equip-inline-block';block.dataset.moduleId=moduleId;
   const mEqs=equipments.filter(e=>e.missionId===currentMissionId&&e.moduleId===moduleId);
   const listDiv=document.createElement('div');listDiv.className='equip-inline-list';
   mEqs.forEach(eq=>{
@@ -604,21 +604,37 @@ function renderMesuresTemp(field,data,body,mod,fd,iIdx,saveFn){
       const updateDT=()=>{const d=parseFloat(row.querySelector('.mesure-dep').value),r=parseFloat(row.querySelector('.mesure-ret').value);const dtEl=document.getElementById(`dt-${key}-${pi}`);if(!isNaN(d)&&!isNaN(r))dtEl.textContent=(d-r).toFixed(1)+' K';else dtEl.textContent='—';};
       row.querySelector('.mesure-dep').addEventListener('input',updateDT);row.querySelector('.mesure-ret').addEventListener('input',updateDT);
       const savePoint=async()=>{
-        const pts=[...points];pts[pi]={type:row.querySelector('.mesure-point-type').value,libelle:row.querySelector('.mesure-libelle')?.value||'',unite:row.querySelector('.mesure-unite')?.value||'°C',dep:row.querySelector('.mesure-dep').value,ret:row.querySelector('.mesure-ret').value};
-        const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
-        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
+        const fdd=getMFD();
+        const curPts=iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
+        const updPts=JSON.parse(JSON.stringify(curPts));
+        if(!updPts[pi])updPts[pi]={};
+        updPts[pi].type=row.querySelector('.mesure-point-type').value;
+        updPts[pi].libelle=row.querySelector('.mesure-libelle')?.value||'';
+        updPts[pi].unite=row.querySelector('.mesure-unite')?.value||'°C';
+        updPts[pi].dep=row.querySelector('.mesure-dep').value;
+        updPts[pi].ret=row.querySelector('.mesure-ret').value;
+        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=updPts;}
+        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=updPts;}
         saveFn?await saveFn(fdd):await saveMFD(fdd);
       };
       row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',savePoint));
-      row.querySelector('.mesure-del').addEventListener('click',async()=>{const pts=[...points];pts.splice(pi,1);const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(iIdx!==null){if(!fdd.repeatData[mod.id]?.[iIdx])return;fdd.repeatData[mod.id][iIdx][field.id]=pts;}else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}saveFn?await saveFn(fdd):await saveMFD(fdd);renderPoints(pts);});
+      row.querySelector('.mesure-del').addEventListener('click',async()=>{
+        const fdd=getMFD();
+        const curPts=iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
+        const pts=JSON.parse(JSON.stringify(curPts));pts.splice(pi,1);
+        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
+        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
+        saveFn?await saveFn(fdd):await saveMFD(fdd);renderPoints(pts);
+      });
       row.querySelector('.mesure-point-type').addEventListener('change',async()=>{const pts=[...points];pts[pi].type=row.querySelector('.mesure-point-type').value;const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(iIdx!==null){if(!fdd.repeatData[mod.id]?.[iIdx])return;fdd.repeatData[mod.id][iIdx][field.id]=pts;}else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}saveFn?await saveFn(fdd):await saveMFD(fdd);renderPoints(pts);});
       updateDT();block.appendChild(row);
     });
     const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter un point de mesure';
     addBtn.addEventListener('click',async()=>{
-      const pts=[...points,{type:(field.pointOptions||[])[0]||'',dep:'',ret:''}];
-      const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
+      const fdd=getMFD();
+      const curPts=iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
+      const pts=JSON.parse(JSON.stringify(curPts));
+      pts.push({type:(field.pointOptions||[])[0]||'',dep:'',ret:''});
       if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
       else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
       saveFn?await saveFn(fdd):await saveMFD(fdd);renderPoints(pts);
@@ -641,8 +657,13 @@ function renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn){
   const block=document.createElement('div');block.className='courbe-block';
   const canvas=document.createElement('canvas');canvas.className='courbe-canvas';canvas.width=400;canvas.height=200;
 
+  const PAD={l:46,r:16,t:20,b:36};
   const drawCurve=()=>{
-    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
+    const W=canvas.width,H=canvas.height;
+    const ctx=canvas.getContext('2d');
+    ctx.clearRect(0,0,W,H);
+    // Background
+    ctx.fillStyle='#0d1b2a';ctx.fillRect(0,0,W,H);
     const pts=block.querySelectorAll('.courbe-point-row');
     const points=[];
     pts.forEach(row=>{
@@ -650,21 +671,62 @@ function renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn){
       const d=parseFloat(row.querySelector('.c-dep').value);
       if(!isNaN(t)&&!isNaN(d))points.push({t,d});
     });
-    if(points.length<2){ctx.fillStyle='#344f6a';ctx.font='12px monospace';ctx.fillText('Entrez au moins 2 points',10,100);return;}
+    if(points.length<2){
+      ctx.fillStyle='#445566';ctx.font='12px monospace';ctx.textAlign='center';
+      ctx.fillText('Entrez au moins 2 points pour afficher la courbe',W/2,H/2);
+      return;
+    }
     points.sort((a,b)=>a.t-b.t);
-    const minT=Math.min(...points.map(p=>p.t))-5;
-    const maxT=Math.max(...points.map(p=>p.t))+5;
-    const minD=Math.min(...points.map(p=>p.d))-5;
-    const maxD=Math.max(...points.map(p=>p.d))+5;
-    const px=(t)=>((t-minT)/(maxT-minT))*(canvas.width-40)+20;
-    const py=(d)=>canvas.height-20-((d-minD)/(maxD-minD))*(canvas.height-40);
-    ctx.strokeStyle='#243650';ctx.lineWidth=1;
-    for(let t=Math.ceil(minT);t<=maxT;t+=5){ctx.beginPath();ctx.moveTo(px(t),10);ctx.lineTo(px(t),canvas.height-10);ctx.stroke();}
-    for(let d=Math.ceil(minD/5)*5;d<=maxD;d+=5){ctx.beginPath();ctx.moveTo(15,py(d));ctx.lineTo(canvas.width-15,py(d));ctx.stroke();}
-    ctx.strokeStyle='#1e7fd4';ctx.lineWidth=2;ctx.beginPath();points.forEach((p,i)=>{i===0?ctx.moveTo(px(p.t),py(p.d)):ctx.lineTo(px(p.t),py(p.d));});ctx.stroke();
-    ctx.fillStyle='#1e7fd4';points.forEach(p=>{ctx.beginPath();ctx.arc(px(p.t),py(p.d),4,0,Math.PI*2);ctx.fill();});
-    ctx.fillStyle='#e8f0f8';ctx.font='10px monospace';
-    ctx.fillText('Text(°C)',5,15);ctx.fillText('Tdep(°C)',canvas.width-60,15);
+    const minT=Math.min(...points.map(p=>p.t));
+    const maxT=Math.max(...points.map(p=>p.t));
+    const minD=Math.min(...points.map(p=>p.d));
+    const maxD=Math.max(...points.map(p=>p.d));
+    const padT=(maxT-minT)*0.1||5, padD=(maxD-minD)*0.1||5;
+    const x0=minT-padT, x1=maxT+padT;
+    const y0=minD-padD, y1=maxD+padD;
+    const px=t=>PAD.l+(t-x0)/(x1-x0)*(W-PAD.l-PAD.r);
+    const py=d=>H-PAD.b-(d-y0)/(y1-y0)*(H-PAD.t-PAD.b);
+    // Grid & axes
+    ctx.strokeStyle='#1e3f5e';ctx.lineWidth=1;
+    // X grid ticks
+    const stepT=Math.ceil((x1-x0)/6);
+    for(let t=Math.ceil(x0/stepT)*stepT;t<=x1;t+=stepT){
+      ctx.beginPath();ctx.moveTo(px(t),PAD.t);ctx.lineTo(px(t),H-PAD.b);ctx.stroke();
+    }
+    // Y grid ticks
+    const stepD=Math.ceil((y1-y0)/5);
+    for(let d=Math.ceil(y0/stepD)*stepD;d<=y1;d+=stepD){
+      ctx.beginPath();ctx.moveTo(PAD.l,py(d));ctx.lineTo(W-PAD.r,py(d));ctx.stroke();
+    }
+    // Axes
+    ctx.strokeStyle='#2d5a8e';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(PAD.l,PAD.t);ctx.lineTo(PAD.l,H-PAD.b);ctx.lineTo(W-PAD.r,H-PAD.b);ctx.stroke();
+    // Axis labels
+    ctx.fillStyle='#6a90b0';ctx.font='10px monospace';ctx.textAlign='center';
+    for(let t=Math.ceil(x0/stepT)*stepT;t<=x1;t+=stepT){
+      ctx.fillText(t+'°',px(t),H-PAD.b+12);
+    }
+    ctx.textAlign='right';
+    for(let d=Math.ceil(y0/stepD)*stepD;d<=y1;d+=stepD){
+      ctx.fillText(d+'°',PAD.l-4,py(d)+3);
+    }
+    // Axis titles
+    ctx.fillStyle='#7a95b0';ctx.font='9px monospace';ctx.textAlign='center';
+    ctx.fillText('Temp. extérieure (°C)',W/2,H-2);
+    ctx.save();ctx.translate(11,H/2);ctx.rotate(-Math.PI/2);
+    ctx.fillText('T départ (°C)',0,0);ctx.restore();
+    // Zero line if visible
+    if(x0<0&&x1>0){ctx.strokeStyle='#2d5a8e';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(px(0),PAD.t);ctx.lineTo(px(0),H-PAD.b);ctx.stroke();ctx.setLineDash([]);}
+    // Curve
+    ctx.strokeStyle='#1e7fd4';ctx.lineWidth=2.5;ctx.lineJoin='round';
+    ctx.beginPath();points.forEach((p,i)=>{i===0?ctx.moveTo(px(p.t),py(p.d)):ctx.lineTo(px(p.t),py(p.d));});ctx.stroke();
+    // Data points with labels
+    points.forEach(p=>{
+      ctx.fillStyle='#1e7fd4';ctx.beginPath();ctx.arc(px(p.t),py(p.d),5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='white';ctx.beginPath();ctx.arc(px(p.t),py(p.d),2,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#e8f0f8';ctx.font='9px monospace';ctx.textAlign='center';
+      ctx.fillText(p.d+'°',px(p.t),py(p.d)-8);
+    });
   };
 
   const renderPts=(points)=>{
@@ -904,6 +966,26 @@ async function deleteMission(id){
   const me=equipments.filter(e=>e.missionId===id);for(const e of me)await dbDel('equipments',e.id);equipments=equipments.filter(e=>e.missionId!==id);
   await dbDel('missions',id);missions=missions.filter(m=>m.id!==id);
   if(document.getElementById('view-site').classList.contains('active'))renderSiteView();else renderAllMissions();showToast('Mission supprimée');
+}
+
+
+// Refresh all equipment inline lists without rebuilding full form
+function refreshAllEquipInline(){
+  document.querySelectorAll('.equip-inline-block').forEach(block=>{
+    const moduleId=block.dataset.moduleId;
+    if(!moduleId)return;
+    const listDiv=block.querySelector('.equip-inline-list');
+    if(!listDiv)return;
+    const mEqs=equipments.filter(e=>e.missionId===currentMissionId&&e.moduleId===moduleId);
+    listDiv.innerHTML='';
+    mEqs.forEach(eq=>{
+      const item=document.createElement('div');item.className='equip-inline-item';
+      item.innerHTML=`<div class="equip-inline-name">${esc(eq.name||'—')}</div><div class="equip-inline-meta">${[eq.brand,eq.model].filter(Boolean).join(' · ')}</div><div class="equip-inline-actions"><button class="card-btn" data-id="${eq.id}" data-action="edit">✏️</button><button class="card-btn" data-id="${eq.id}" data-action="delete">🗑️</button></div>`;
+      item.querySelector('[data-action=edit]').addEventListener('click',()=>openEqModal(eq.id,moduleId));
+      item.querySelector('[data-action=delete]').addEventListener('click',async()=>{if(!confirm('Supprimer ?'))return;await dbDel('equipments',eq.id);equipments=equipments.filter(e=>e.id!==eq.id);refreshAllEquipInline();});
+      listDiv.appendChild(item);
+    });
+  });
 }
 
 function openEqModal(id=null,moduleId=null,photoData=null){
