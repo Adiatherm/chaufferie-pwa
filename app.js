@@ -362,93 +362,849 @@ async function saveMFD(fd){
   if(idx>=0)formDataStore[idx]=fd;else formDataStore.push(fd);
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+//  FORMS ENGINE — Clean rewrite
+//  Rules:
+//  1. Module order is always fixed per FORM_MODULES array
+//  2. collapseState survives ALL re-renders
+//  3. renderFormsZone() only on structural changes
+//  4. Field saves → getMFD + merge, no DOM rebuild
+//  5. localSave → deep merge per module, never overwrites siblings
+// ══════════════════════════════════════════════════════════════════
+
+// ── LOCAL DATA HELPERS ────────────────────────────────────────────
+function getLocalKey(){
+  const fd=getMFD();return `local_${fd.activeLocalIdx||0}`;
+}
+function getLocalFd(){
+  const fd=getMFD();const lk=getLocalKey();
+  const ld=(fd.localData||{})[lk]||{};
+  return {
+    id:fd.id,
+    activeModules:fd.localModules?.[lk]||[],
+    data:ld.data||{},
+    repeatData:ld.repeatData||{},
+    comments:ld.comments||{},
+    cahierYears:ld.cahierYears||{}
+  };
+}
+async function saveLocalField(modId, fieldId, value, iIdx=null){
+  // Save a single field value without touching anything else
+  const mainFd=getMFD();const lk=getLocalKey();
+  if(!mainFd.localData)mainFd.localData={};
+  if(!mainFd.localData[lk])mainFd.localData[lk]={data:{},repeatData:{},comments:{},cahierYears:{}};
+  const ld=mainFd.localData[lk];
+  if(iIdx!==null){
+    if(!ld.repeatData[modId])ld.repeatData[modId]=[];
+    while(ld.repeatData[modId].length<=iIdx)ld.repeatData[modId].push({});
+    ld.repeatData[modId][iIdx][fieldId]=value;
+  }else{
+    if(!ld.data[modId])ld.data[modId]={};
+    ld.data[modId][fieldId]=value;
+  }
+  await saveMFD(mainFd);
+}
+async function saveLocalComment(fieldKey, comments){
+  const mainFd=getMFD();const lk=getLocalKey();
+  if(!mainFd.localData)mainFd.localData={};
+  if(!mainFd.localData[lk])mainFd.localData[lk]={data:{},repeatData:{},comments:{},cahierYears:{}};
+  mainFd.localData[lk].comments[fieldKey]=comments;
+  await saveMFD(mainFd);
+}
+function getFieldValue(modId, fieldId, iIdx=null){
+  const lfd=getLocalFd();
+  if(iIdx!==null)return(lfd.repeatData[modId]||[])[iIdx]?.[fieldId]||'';
+  return(lfd.data[modId]||{})[fieldId]||'';
+}
+function getRepeatInstances(modId){
+  return getLocalFd().repeatData[modId]||[{}];
+}
+
+// ── COLLAPSE STATE ─────────────────────────────────────────────────
+function getCollapseKey(modId,instanceIdx=null){
+  const lk=getLocalKey();
+  return instanceIdx!==null?`${lk}_${modId}_${instanceIdx}`:`${lk}_${modId}`;
+}
+function setCollapsed(modId,collapsed,instanceIdx=null){
+  collapseState.set(getCollapseKey(modId,instanceIdx),collapsed);
+}
+function isCollapsed(modId,instanceIdx=null){
+  return collapseState.get(getCollapseKey(modId,instanceIdx))||false;
+}
+
+// ── MAIN RENDER ────────────────────────────────────────────────────
 function renderFormsZone(){
   const fd=getMFD();
   const locaux=fd.locaux||[];
+
+  // Render locaux setup panel (always)
   renderLocauxSetup(locaux,fd);
+
   const tabsBar=document.getElementById('local-tabs-bar');
   const modulesSel=document.getElementById('modules-selector');
-  const formsContainer=document.getElementById('active-forms-container');
-  formsContainer.innerHTML='';
-  if(!locaux.length){tabsBar.style.display='none';modulesSel.style.display='none';return;}
+  const container=document.getElementById('active-forms-container');
+
+  if(!locaux.length){
+    tabsBar.style.display='none';modulesSel.style.display='none';
+    container.innerHTML='<div class="empty-state" style="padding:20px"><p style="color:var(--text-muted)">Ajoutez d\'abord un local technique ci-dessus.</p></div>';
+    return;
+  }
   tabsBar.style.display='';modulesSel.style.display='';
+
   const activeLocal=fd.activeLocalIdx||0;
-  // Tabs
+  currentLocalType=locaux[activeLocal]?.type||'';
+  currentEnergie=sites.find(s=>s.id===currentSiteId)?.energie||'';
+
+  // Local tabs bar
   tabsBar.innerHTML='';
   locaux.forEach((loc,i)=>{
     const t=document.createElement('button');
     t.className='local-tab'+(i===activeLocal?' local-tab-active':'');
-    t.textContent=loc.nom||loc.type||`Local ${i+1}`;
-    t.addEventListener('click',async()=>{const fdd=getMFD();fdd.activeLocalIdx=i;await saveMFD(fdd);renderFormsZone();});
+    t.textContent=loc.nom?`${loc.type} — ${loc.nom}`:loc.type||`Local ${i+1}`;
+    t.addEventListener('click',async()=>{
+      if(i===activeLocal)return;
+      const fdd=getMFD();fdd.activeLocalIdx=i;await saveMFD(fdd);renderFormsZone();
+    });
     tabsBar.appendChild(t);
   });
-  // Module toggles
-  const localKey=`local_${activeLocal}`;
-  const activeModules=fd.localModules?.[localKey]||[];
-  const site=sites.find(s=>s.id===currentSiteId);
-  const energie=site?.energie||'';currentEnergie=energie;
-  modulesSel.innerHTML='<h3 style="font-family:var(--font-display);font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text-secondary)">Modules pour ce local</h3><div class="module-toggles" id="module-toggles"></div>';
-  const grid=document.getElementById('module-toggles');
+
+  // Module toggles — FIXED ORDER always
+  const lk=getLocalKey();
+  const activeModules=fd.localModules?.[lk]||[];
+
+  modulesSel.innerHTML='';
+  const selHeader=document.createElement('div');
+  selHeader.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:10px';
+  selHeader.innerHTML='<h3 style="font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--text-secondary)">Modules pour ce local</h3>';
+  modulesSel.appendChild(selHeader);
+  const grid=document.createElement('div');grid.className='module-toggles';
   FORM_MODULES.forEach(mod=>{
     const isActive=activeModules.includes(mod.id);
     const btn=document.createElement('div');btn.className='module-toggle'+(isActive?' active':'');
     btn.innerHTML=`<span class="module-toggle-icon">${mod.icon}</span><span class="module-toggle-label" style="color:${mod.color}">${mod.label}</span><div class="mt-check"></div>`;
     btn.addEventListener('click',async()=>{
       const fdd=getMFD();if(!fdd.localModules)fdd.localModules={};
-      const mods=[...(fdd.localModules[localKey]||[])];
+      const mods=[...(fdd.localModules[lk]||[])];
       const idx=mods.indexOf(mod.id);if(idx>=0)mods.splice(idx,1);else mods.push(mod.id);
-      fdd.localModules[localKey]=mods;
-      await saveMFD(fdd);renderFormsZone();
+      fdd.localModules[lk]=mods;await saveMFD(fdd);
+      // Toggle in place without full re-render
+      refreshModuleBlock(mod.id, mods.includes(mod.id));
+      btn.classList.toggle('active', mods.includes(mod.id));
+      btn.querySelector('.mt-check').className='mt-check';
     });
     grid.appendChild(btn);
   });
-  // Render modules - use saved data, don't re-create from scratch
-  const localDataEntry=(fd.localData||{})[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
-  const localFd={id:fd.id,activeModules,data:localDataEntry.data||{},repeatData:localDataEntry.repeatData||{},comments:localDataEntry.comments||{},cahierYears:localDataEntry.cahierYears||{}};
-  const localSave=async(fdd)=>{
-    const mainFdd=getMFD();
-    if(!mainFdd.localData)mainFdd.localData={};
-    const existing=mainFdd.localData[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
-    // Deep merge each key to avoid overwriting sibling module data
-    const mergedData={};
-    Object.assign(mergedData,existing.data||{});
-    Object.keys(fdd.data||{}).forEach(k=>{mergedData[k]={...((existing.data||{})[k]||{}),...(fdd.data[k]||{})};});
-    const mergedRepeat={};
-    Object.assign(mergedRepeat,existing.repeatData||{});
-    Object.keys(fdd.repeatData||{}).forEach(k=>{mergedRepeat[k]=fdd.repeatData[k];});
-    mainFdd.localData[localKey]={
-      data:mergedData,
-      repeatData:mergedRepeat,
-      comments:{...(existing.comments||{}),...(fdd.comments||{})},
-      cahierYears:{...(existing.cahierYears||{}),...(fdd.cahierYears||{})},
-    };
-    await saveMFD(mainFdd);
-  };
-  const localType=locaux[activeLocal]?.type||'';currentLocalType=localType;
-  activeModules.forEach(modId=>{
-    const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
-    if(mod.multiYear)renderCahierBlock(mod,localFd,formsContainer,localSave);
-    else if(mod.repeatable)renderRepeatableBlock(mod,localFd,formsContainer,localSave,localType,energie);
-    else renderFormBlock(mod,localFd,formsContainer,localSave,localType,energie);
+  modulesSel.appendChild(grid);
+
+  // Render module blocks in FIXED ORDER
+  container.innerHTML='';
+  // Always render in FORM_MODULES order
+  FORM_MODULES.forEach(mod=>{
+    if(!activeModules.includes(mod.id))return;
+    const block=buildModuleBlock(mod);
+    block.id=`form-block-${mod.id}`;
+    container.appendChild(block);
   });
 }
 
-function renderLocauxSetup(locaux,fd){
-  const container=document.getElementById('locaux-list-container');
+// Build or rebuild a single module block
+function buildModuleBlock(mod){
+  const wrapper=document.createElement('div');wrapper.id=`form-block-${mod.id}`;
+
+  if(mod.multiYear){
+    renderCahierBlock(mod,wrapper);
+  }else if(mod.repeatable){
+    renderRepeatableBlock(mod,wrapper);
+  }else{
+    renderSimpleBlock(mod,wrapper);
+  }
+  return wrapper;
+}
+
+// Toggle a module block in/out of the container
+function refreshModuleBlock(modId, active){
+  const container=document.getElementById('active-forms-container');
   if(!container)return;
+
+  if(!active){
+    const existing=document.getElementById(`form-block-${modId}`);
+    if(existing)existing.remove();
+    return;
+  }
+
+  // Add in correct position (FORM_MODULES order)
+  const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
+  const block=buildModuleBlock(mod);
+  block.id=`form-block-${modId}`;
+
+  // Find where to insert (maintain order)
+  const modIndex=FORM_MODULES.findIndex(m=>m.id===modId);
+  let inserted=false;
+  const children=[...container.children];
+  for(const child of children){
+    const childModId=child.id?.replace('form-block-','');
+    const childIndex=FORM_MODULES.findIndex(m=>m.id===childModId);
+    if(childIndex>modIndex){
+      container.insertBefore(block,child);
+      inserted=true;break;
+    }
+  }
+  if(!inserted)container.appendChild(block);
+}
+
+// ── SIMPLE (non-repeatable) MODULE BLOCK ──────────────────────────
+function renderSimpleBlock(mod,wrapper){
+  const collapsed=isCollapsed(mod.id);
+  const block=document.createElement('div');block.className='form-block';
+  const header=document.createElement('div');header.className='form-block-header';
+  header.style.cursor='pointer';
+  header.innerHTML=`<div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 4px;line-height:1">${collapsed?'+':'−'}</button>`;
+
+  const body=document.createElement('div');body.className='form-block-body';
+  if(collapsed)body.style.display='none';
+
+  // Equipment inline at top for modules with hasEquipment
+  if(mod.hasEquipment){
+    const equip=buildEquipmentInline(mod.id);body.appendChild(equip);
+    const divider=document.createElement('div');divider.className='form-section-title';divider.textContent='RELEVÉS';body.appendChild(divider);
+  }
+
+  // Fields
+  const allFields=mod.sections?mod.sections.flatMap(s=>[{type:'__sec',label:s.title},...s.fields]):(mod.fields||[]);
+  allFields.forEach(f=>renderFieldInto(f,body,mod,null));
+  if(mod.notes_field)renderFieldInto(mod.notes_field,body,mod,null);
+
+  header.addEventListener('click',()=>{
+    const c=body.style.display==='none';
+    body.style.display=c?'':'none';
+    header.querySelector('.collapse-btn').textContent=c?'−':'+';
+    setCollapsed(mod.id,!c);
+  });
+
+  block.appendChild(header);block.appendChild(body);wrapper.appendChild(block);
+}
+
+// ── REPEATABLE MODULE BLOCK ───────────────────────────────────────
+function renderRepeatableBlock(mod,wrapper){
+  const instances=getRepeatInstances(mod.id);
+  const collapsed=isCollapsed(mod.id);
+
+  const block=document.createElement('div');block.className='form-block';
+  const header=document.createElement('div');header.className='form-block-header';
+  header.style.cursor='pointer';
+  header.innerHTML=`<div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 4px;line-height:1">${collapsed?'+':'−'}</button>`;
+
+  const body=document.createElement('div');body.className='form-block-body';
+  if(collapsed)body.style.display='none';
+
+  header.addEventListener('click',()=>{
+    const c=body.style.display==='none';
+    body.style.display=c?'':'none';
+    header.querySelector('.collapse-btn').textContent=c?'−':'+';
+    setCollapsed(mod.id,!c);
+  });
+
+  // Render each instance
+  const renderInstances=()=>{
+    // Remove all instance divs but keep the add button
+    [...body.querySelectorAll('.repeat-instance')].forEach(el=>el.remove());
+    const addBtn=body.querySelector('.btn-add-instance');
+
+    const instances=getRepeatInstances(mod.id);
+    instances.forEach((_,idx)=>{
+      const inst=document.createElement('div');inst.className='repeat-instance';
+      const instCollapsed=isCollapsed(mod.id,idx);
+
+      const instHeader=document.createElement('div');instHeader.className='repeat-instance-title';
+      instHeader.style.cssText='display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:6px';
+      const instLabel=document.createElement('span');instLabel.style.color=mod.color;instLabel.textContent=`${mod.repeatLabel} ${idx+1}`;
+      const instCollapseBtn=document.createElement('button');
+      instCollapseBtn.style.cssText='background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:0 4px';
+      instCollapseBtn.textContent=instCollapsed?'+':'−';
+
+      const instBody=document.createElement('div');
+      if(instCollapsed)instBody.style.display='none';
+
+      instHeader.addEventListener('click',()=>{
+        const c=instBody.style.display==='none';
+        instBody.style.display=c?'':'none';
+        instCollapseBtn.textContent=c?'−':'+';
+        setCollapsed(mod.id,!c,idx);
+      });
+
+      instHeader.appendChild(instLabel);
+
+      if(instances.length>1){
+        const del=document.createElement('button');del.className='btn-remove-instance';del.textContent='✕ Supprimer';
+        del.addEventListener('click',async()=>{
+          if(!confirm(`Supprimer ${mod.repeatLabel} ${idx+1} ?`))return;
+          const mainFd=getMFD();const lk=getLocalKey();
+          if(!mainFd.localData?.[lk]?.repeatData?.[mod.id])return;
+          mainFd.localData[lk].repeatData[mod.id].splice(idx,1);
+          await saveMFD(mainFd);
+          // Delete collapse state for this instance and shift others
+          collapseState.delete(getCollapseKey(mod.id,idx));
+          renderInstances();
+        });
+        instHeader.appendChild(del);
+      }
+      instHeader.appendChild(instCollapseBtn);
+
+      // Equipment inline for this instance
+      if(mod.hasEquipment){
+        const equip=buildEquipmentInline(`${mod.id}_${idx}`);instBody.appendChild(equip);
+        const divider=document.createElement('div');divider.className='form-section-title';divider.textContent='RELEVÉS';instBody.appendChild(divider);
+      }
+
+      mod.fields.forEach(f=>renderFieldInto(f,instBody,mod,idx));
+
+      inst.appendChild(instHeader);inst.appendChild(instBody);
+      if(addBtn)body.insertBefore(inst,addBtn);else body.appendChild(inst);
+    });
+  };
+
+  // Add instance button
+  const addBtn=document.createElement('button');addBtn.className='btn-add-instance';
+  addBtn.textContent=`+ Ajouter ${mod.repeatLabel}`;
+  addBtn.addEventListener('click',async()=>{
+    const mainFd=getMFD();const lk=getLocalKey();
+    if(!mainFd.localData)mainFd.localData={};
+    if(!mainFd.localData[lk])mainFd.localData[lk]={data:{},repeatData:{},comments:{},cahierYears:{}};
+    if(!mainFd.localData[lk].repeatData[mod.id])mainFd.localData[lk].repeatData[mod.id]=[];
+    mainFd.localData[lk].repeatData[mod.id].push({});
+    await saveMFD(mainFd);
+    renderInstances();
+  });
+  body.appendChild(addBtn);
+  renderInstances();
+
+  block.appendChild(header);block.appendChild(body);wrapper.appendChild(block);
+}
+
+// ── FIELD RENDERER ────────────────────────────────────────────────
+function renderFieldInto(field,parent,mod,iIdx){
+  const modId=mod.id;
+
+  if(field.type==='__sec'||field.type==='section'){
+    const d=document.createElement('div');d.className='form-section-title';
+    d.textContent=(field.label||'').replace(/^—\s*/,'').replace(/\s*—$/,'');
+    parent.appendChild(d);return;
+  }
+
+  // Skip fields based on local type or energy
+  if(field.showForTypes&&currentLocalType&&!field.showForTypes.includes(currentLocalType))return;
+  if(field.showIfEnergie&&currentEnergie&&!field.showIfEnergie.some(e=>currentEnergie.includes(e)))return;
+  if(field.type==='equipment_inline')return; // handled separately
+
+  // Special composite types
+  if(field.type==='mesures_libres'){renderMesuresLibres(field,parent,modId,iIdx);return;}
+  if(field.type==='mesures_temp'){renderMesuresTemp(field,parent,modId,iIdx);return;}
+  if(field.type==='mesures_chauf'){renderMesuresChauf(field,parent,modId,iIdx);return;}
+  if(field.type==='courbe_chauffe'){renderCourbeChauffe(field,parent,modId,iIdx);return;}
+  if(field.type==='decalage_stepper'){renderDecalageStepper(field,parent,modId,iIdx);return;}
+
+  const wrap=document.createElement('div');wrap.className='form-group';
+  const currentVal=getFieldValue(modId,field.id,iIdx);
+
+  if(field.type==='yesno3'||field.type==='yesno'){
+    wrap.innerHTML=`<label>${esc(field.label)}</label>`;
+    const is4=field.type==='yesno3';
+    const grp=document.createElement('div');grp.className=is4?'yesno4-group':'yesno-group';
+    const opts=is4?[['Oui','oui','y'],['Non','non','n'],['N/A','na','na'],['?','pi','pi']]:[['Oui','oui','yes'],['Non','non','no'],['N/A','na','na']];
+    opts.forEach(([lbl,code,cls])=>{
+      const btn=document.createElement('button');
+      btn.className=(is4?'yesno4-btn':'yesno-btn')+' '+cls+(currentVal===code?' active':'');
+      btn.textContent=lbl;
+      btn.addEventListener('click',async()=>{
+        await saveLocalField(modId,field.id,code,iIdx);
+        grp.querySelectorAll(is4?'.yesno4-btn':'.yesno-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        // Handle conditional
+        if(field.conditional){
+          const condKey=`cond_${modId}_${field.id}${iIdx!==null?'_'+iIdx:''}`;
+          const condDiv=document.getElementById(condKey);
+          if(condDiv)condDiv.style.display=code===field.conditional.showWhen.value?'flex':'none';
+        }
+      });
+      grp.appendChild(btn);
+    });
+    wrap.appendChild(grp);
+
+    // Conditional sub-fields
+    if(field.conditional){
+      const condKey=`cond_${modId}_${field.id}${iIdx!==null?'_'+iIdx:''}`;
+      const condDiv=document.createElement('div');condDiv.className='conditional-fields';
+      condDiv.id=condKey;condDiv.style.display=currentVal===field.conditional.showWhen.value?'flex':'none';
+      field.conditional.fields.forEach(cf=>renderFieldInto(cf,condDiv,mod,iIdx));
+      wrap.appendChild(condDiv);
+    }
+
+    // Comments for conformite
+    if(mod.withComments){
+      const commentKey=`${modId}_${field.id}${iIdx!==null?'_'+iIdx:''}`;
+      const comments=(getLocalFd().comments||{})[commentKey]||[];
+      wrap.appendChild(buildCommentBlock(commentKey,comments,modId));
+    }
+
+  }else if(field.type==='computed'||field.type==='computed_validation'){
+    wrap.innerHTML=`<label>${esc(field.label)}</label><div class="computed-value" id="cv_${modId}_${field.id}${iIdx!==null?'_'+iIdx:''}">—</div>`;
+    setTimeout(()=>updateComputedField(field,modId,iIdx),100);
+
+  }else{
+    // Standard input/select/textarea
+    if(field.type==='select'){
+      wrap.innerHTML=`<label>${esc(field.label)}</label><select id="ff_${modId}_${field.id}${iIdx!==null?'_'+iIdx:''}">${(field.options||[]).map(o=>`<option value="${esc(o)}"${currentVal===o?' selected':''}>${esc(o)}</option>`).join('')}</select>`;
+    }else if(field.type==='textarea'){
+      wrap.innerHTML=`<label>${esc(field.label)}</label><textarea id="ff_${modId}_${field.id}${iIdx!==null?'_'+iIdx:''}" placeholder="${esc(field.placeholder||'')}" rows="3">${esc(currentVal)}</textarea>`;
+    }else{
+      const t=field.type==='number'?'number':field.type==='date'?'date':field.type==='time'?'time':'text';
+      wrap.innerHTML=`<label>${esc(field.label)}</label><input type="${t}" id="ff_${modId}_${field.id}${iIdx!==null?'_'+iIdx:''}" placeholder="${esc(field.placeholder||field.label)}" value="${esc(currentVal)}" ${field.step?'step='+field.step:''} />`;
+    }
+    const el=wrap.querySelector(`[id^="ff_${modId}_${field.id}"]`);
+    if(el){
+      el.addEventListener('change',async()=>{
+        await saveLocalField(modId,field.id,el.value,iIdx);
+        // Update computed fields in same form
+        const allF=mod.fields||[...(mod.sections||[]).flatMap(s=>s.fields)];
+        allF.filter(f=>f.type==='computed'||f.type==='computed_validation').forEach(f=>updateComputedField(f,modId,iIdx));
+      });
+      // ECS: hide ballon temp if prod = instantané
+      if(field.id==='ecs_type_prod'&&iIdx!==null){
+        el.addEventListener('change',()=>{
+          const ballonWrap=document.getElementById(`ff_${modId}_ecs_temp_stockage_${iIdx}`)?.closest('.form-group');
+          if(ballonWrap)ballonWrap.style.display=el.value==='Échangeur instantané'?'none':'';
+        });
+        // Apply initial state
+        const ballonWrap=document.getElementById(`ff_${modId}_ecs_temp_stockage${iIdx!==null?'_'+iIdx:''}`)?.closest('.form-group');
+        if(ballonWrap&&currentVal==='Échangeur instantané')ballonWrap.style.display='none';
+      }
+    }
+  }
+  parent.appendChild(wrap);
+}
+
+// ── COMPUTED FIELDS ───────────────────────────────────────────────
+function updateComputedField(field,modId,iIdx){
+  const suffix=iIdx!==null?'_'+iIdx:'';
+  const el=document.getElementById(`cv_${modId}_${field.id}${suffix}`);if(!el)return;
+  const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
+  const allF=mod.fields||[...(mod.sections||[]).flatMap(s=>s.fields)];
+  const vars={};
+  allF.forEach(f=>{
+    const inp=document.getElementById(`ff_${modId}_${f.id}${suffix}`);
+    if(inp){const v=parseFloat(inp.value);if(!isNaN(v))vars[f.id]=v;}
+  });
+  try{
+    const result=new Function(...Object.keys(vars),'return '+field.formula)(...Object.values(vars));
+    if(field.type==='computed_validation'){
+      const lfd=getLocalFd();const puissMap={'< 70 kW':50,'≥ 70 kW et < 400 kW':200,'≥ 400 kW et < 1 MW':700,'≥ 1 MW':1500};
+      const puissKw=puissMap[(lfd.data['generalites']||{})['puissance_chaudiere']]||0;
+      const section=isNaN(result)?0:result;
+      if(!puissKw||!section){el.innerHTML='<span class="validation-na">Renseigner puissance</span>';return;}
+      const req=field.rule==='ventilation_vh'?puissKw*6:puissKw*3;
+      el.innerHTML=section>=req?`<span class="validation-ok">✅ ${Math.round(section)} ≥ ${Math.round(req)} cm²</span>`:`<span class="validation-ko">❌ ${Math.round(section)} < ${Math.round(req)} cm²</span>`;
+    }else{
+      el.textContent=isNaN(result)?'—':(Math.round(result*100)/100)+' '+(field.unit||'');
+    }
+  }catch{el.textContent='—';}
+}
+
+// ── EQUIPMENT INLINE ──────────────────────────────────────────────
+function buildEquipmentInline(moduleId){
+  const block=document.createElement('div');block.className='equip-inline-block';block.dataset.moduleId=moduleId;
+  const refreshList=()=>{
+    const listDiv=block.querySelector('.equip-inline-list');if(!listDiv)return;
+    const baseId=moduleId.replace(/_\d+$/,'');
+    const mEqs=equipments.filter(e=>e.missionId===currentMissionId&&(e.moduleContext===moduleId||e.moduleId===baseId&&!moduleId.match(/_\d+$/)));
+    listDiv.innerHTML='';
+    mEqs.forEach(eq=>{
+      const item=document.createElement('div');item.className='equip-inline-item';
+      item.innerHTML=`<div class="equip-inline-name">${esc(eq.name||'—')}</div><div class="equip-inline-meta">${[eq.brand,eq.model].filter(Boolean).join(' · ')}</div><div class="equip-inline-actions"><button class="card-btn" data-action="edit">✏️</button><button class="card-btn" data-action="del">🗑️</button></div>`;
+      item.querySelector('[data-action=edit]').addEventListener('click',()=>openEqModal(eq.id,moduleId));
+      item.querySelector('[data-action=del]').addEventListener('click',async()=>{
+        if(!confirm('Supprimer ?'))return;
+        await dbDel('equipments',eq.id);equipments=equipments.filter(e=>e.id!==eq.id);refreshList();
+      });
+      listDiv.appendChild(item);
+    });
+  };
+
+  const listDiv=document.createElement('div');listDiv.className='equip-inline-list';
+  const btnRow=document.createElement('div');btnRow.style.cssText='display:flex;gap:8px;margin-top:4px';
+  const addBtn=document.createElement('button');addBtn.className='equip-add-btn';addBtn.textContent='+ Saisir manuellement';
+  addBtn.addEventListener('click',()=>openEqModal(null,moduleId));
+  const scanBtn=document.createElement('button');scanBtn.className='equip-scan-btn';scanBtn.textContent='📷 Scanner';
+  scanBtn.addEventListener('click',()=>{editingEqContext=moduleId;openScanForModule(moduleId);});
+  btnRow.appendChild(addBtn);btnRow.appendChild(scanBtn);
+  block.appendChild(listDiv);block.appendChild(btnRow);
+  // Expose refresh
+  block._refresh=refreshList;
+  refreshList();
+  return block;
+}
+
+// ── MESURES LIBRES ────────────────────────────────────────────────
+function renderMesuresLibres(field,parent,modId,iIdx){
+  const block=document.createElement('div');
+  const getPoints=()=>{const lfd=getLocalFd();return JSON.parse(JSON.stringify((lfd.data[modId]||{})[field.id]||[]));};
+  const renderPts=(points)=>{
+    block.innerHTML='';
+    if(points.length){
+      const hdr=document.createElement('div');hdr.style.cssText='display:grid;grid-template-columns:1fr 1fr 60px 28px;gap:6px;margin-bottom:4px';
+      hdr.innerHTML='<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase">Libellé</span><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase">Valeur</span><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase">Unité</span><span></span>';
+      block.appendChild(hdr);
+    }
+    const IS='background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%';
+    points.forEach((pt,pi)=>{
+      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:1fr 1fr 60px 28px;gap:6px;align-items:center;margin-bottom:5px';
+      row.innerHTML=`<input type="text" class="ml-l" value="${esc(pt.label||'')}" placeholder="Ex: Ø cheminée" style="${IS}"/><input type="text" class="ml-v" value="${esc(pt.val||'')}" placeholder="Valeur" style="${IS}"/><input type="text" class="ml-u" value="${esc(pt.unit||'')}" placeholder="cm" style="${IS}"/><button style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px">✕</button>`;
+      const save=async()=>{const pts=getPoints();if(!pts[pi])pts[pi]={};pts[pi].label=row.querySelector('.ml-l').value;pts[pi].val=row.querySelector('.ml-v').value;pts[pi].unit=row.querySelector('.ml-u').value;await saveLocalField(modId,field.id,pts,iIdx);};
+      row.querySelectorAll('input').forEach(el=>el.addEventListener('change',save));
+      row.querySelector('button').addEventListener('click',async()=>{const pts=getPoints();pts.splice(pi,1);await saveLocalField(modId,field.id,pts,iIdx);renderPts(pts);});
+      block.appendChild(row);
+    });
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter une mesure';
+    addBtn.addEventListener('click',async()=>{const pts=getPoints();pts.push({label:'',val:'',unit:''});await saveLocalField(modId,field.id,pts,iIdx);renderPts(pts);});
+    block.appendChild(addBtn);
+  };
+  renderPts(getPoints());parent.appendChild(block);
+}
+
+// ── MESURES TEMP (primaire) ───────────────────────────────────────
+function renderMesuresTemp(field,parent,modId,iIdx){
+  const block=document.createElement('div');
+  const getPoints=()=>{
+    const lfd=getLocalFd();
+    if(iIdx!==null)return JSON.parse(JSON.stringify(((lfd.repeatData[modId]||[])[iIdx]||{})[field.id]||[]));
+    return JSON.parse(JSON.stringify((lfd.data[modId]||{})[field.id]||[]));
+  };
+  const savePoints=async(pts)=>saveLocalField(modId,field.id,pts,iIdx);
+
+  const renderPts=(points)=>{
+    block.innerHTML='';
+    points.forEach((pt,pi)=>{
+      const row=document.createElement('div');row.className='mesure-point';
+      const isAutre=pt.type==='Autre';
+      row.innerHTML=`<div class="mesure-point-header"><select class="mpt">${(field.pointOptions||[]).map(o=>`<option value="${esc(o)}"${pt.type===o?' selected':''}>${esc(o)}</option>`).join('')}</select><button class="mesure-del">✕</button></div>${isAutre?`<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px"><input type="text" class="mp-lib" value="${esc(pt.libelle||'')}" placeholder="Libellé" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%"/><input type="text" class="mp-uni" value="${esc(pt.unite||'°C')}" placeholder="Unité" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%"/></div>`:''}<div class="mesure-row"><div class="mesure-cell"><label>Départ</label><input type="number" class="mp-dep" step="0.1" value="${pt.dep||''}" placeholder="—"/></div><div class="mesure-cell"><label>Retour</label><input type="number" class="mp-ret" step="0.1" value="${pt.ret||''}" placeholder="—"/></div><div class="mesure-cell"><label>ΔT</label><div class="mesure-delta" id="dt${modId}${pi}">—</div></div></div>`;
+      const updt=()=>{const d=parseFloat(row.querySelector('.mp-dep').value),r=parseFloat(row.querySelector('.mp-ret').value);const el=document.getElementById(`dt${modId}${pi}`);if(el)el.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' K':'—';};
+      row.querySelectorAll('input').forEach(el=>el.addEventListener('input',updt));
+      const save=async()=>{const pts=getPoints();if(!pts[pi])pts[pi]={};pts[pi].type=row.querySelector('.mpt').value;pts[pi].dep=row.querySelector('.mp-dep').value;pts[pi].ret=row.querySelector('.mp-ret').value;if(isAutre){pts[pi].libelle=row.querySelector('.mp-lib')?.value||'';pts[pi].unite=row.querySelector('.mp-uni')?.value||'°C';}await savePoints(pts);};
+      row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',save));
+      row.querySelector('.mpt').addEventListener('change',async()=>{const pts=getPoints();pts[pi]={type:row.querySelector('.mpt').value};await savePoints(pts);renderPts(pts);});
+      row.querySelector('.mesure-del').addEventListener('click',async()=>{const pts=getPoints();pts.splice(pi,1);await savePoints(pts);renderPts(pts);});
+      updt();block.appendChild(row);
+    });
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter un point de mesure';
+    addBtn.addEventListener('click',async()=>{const pts=getPoints();pts.push({type:(field.pointOptions||[])[0]||'',dep:'',ret:''});await savePoints(pts);renderPts(pts);});
+    block.appendChild(addBtn);
+  };
+  renderPts(getPoints());parent.appendChild(block);
+}
+
+// ── MESURES CHAUFFAGE (avec sous-types) ───────────────────────────
+function renderMesuresChauf(field,parent,modId,iIdx){
+  const block=document.createElement('div');
+  const getPoints=()=>{
+    const lfd=getLocalFd();
+    if(iIdx!==null)return JSON.parse(JSON.stringify(((lfd.repeatData[modId]||[])[iIdx]||{})[field.id]||[]));
+    return JSON.parse(JSON.stringify((lfd.data[modId]||{})[field.id]||[]));
+  };
+  const savePoints=async(pts)=>saveLocalField(modId,field.id,pts,iIdx);
+
+  const TYPES=field.pointOptions||[];
+  const renderPts=(points)=>{
+    block.innerHTML='';
+    points.forEach((pt,pi)=>{
+      const row=document.createElement('div');row.className='mesure-point';
+      const t=pt.type||TYPES[0]||'';
+      const isTR=t==='Températures réseau';
+      const isPP=t==='Pression pompe';
+      const isDeb=t==='Débit';
+      const isAut=t==='Autre';
+
+      let sub='';
+      if(isTR){
+        sub=`<div class="mesure-row"><div class="mesure-cell"><label>Départ (°C)</label><input type="number" class="mc-d" step="0.1" value="${pt.dep||''}"/></div><div class="mesure-cell"><label>Retour (°C)</label><input type="number" class="mc-r" step="0.1" value="${pt.ret||''}"/></div><div class="mesure-cell"><label>ΔT</label><div class="mesure-delta" id="dmc${modId}${pi}${iIdx||''}">—</div></div></div>`;
+      }else if(isPP){
+        sub=`<div class="mesure-row"><div class="mesure-cell"><label>Aspiration (bar)</label><input type="number" class="mc-a" step="0.01" value="${pt.asp||''}"/></div><div class="mesure-cell"><label>Refoulement (bar)</label><input type="number" class="mc-f" step="0.01" value="${pt.ref||''}"/></div><div class="mesure-cell"><label>ΔP</label><div class="mesure-delta" id="dmc${modId}${pi}${iIdx||''}">—</div></div></div>`;
+      }else if(isDeb){
+        sub=`<div class="mesure-row"><div class="mesure-cell" style="grid-column:1/-1"><label>Débit (m³/h)</label><input type="number" class="mc-db" step="0.01" value="${pt.debit||''}"/></div></div>`;
+      }else if(isAut){
+        sub=`<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px"><input type="text" class="mc-lib" value="${esc(pt.libelle||'')}" placeholder="Libellé" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%"/><div style="display:flex;gap:6px"><input type="text" class="mc-val" value="${esc(pt.val||'')}" placeholder="Valeur" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none"/><input type="text" class="mc-uni" value="${esc(pt.unite||'')}" placeholder="Unité" style="width:70px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none"/></div></div>`;
+      }else{
+        sub=`<div class="mesure-row"><div class="mesure-cell" style="grid-column:1/-1"><label>Valeur (°C)</label><input type="number" class="mc-v" step="0.1" value="${pt.val||''}"/></div></div>`;
+      }
+
+      row.innerHTML=`<div class="mesure-point-header"><select class="mct">${TYPES.map(o=>`<option value="${esc(o)}"${t===o?' selected':''}>${esc(o)}</option>`).join('')}</select><button class="mesure-del">✕</button></div>${sub}`;
+
+      const dtEl=()=>document.getElementById(`dmc${modId}${pi}${iIdx||''}`);
+      const updt=()=>{
+        const el=dtEl();if(!el)return;
+        if(isTR){const d=parseFloat(row.querySelector('.mc-d')?.value),r=parseFloat(row.querySelector('.mc-r')?.value);el.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' K':'—';}
+        else if(isPP){const a=parseFloat(row.querySelector('.mc-a')?.value),f=parseFloat(row.querySelector('.mc-f')?.value);el.textContent=(!isNaN(a)&&!isNaN(f))?(f-a).toFixed(2)+' bar':'—';}
+      };
+      row.querySelectorAll('input').forEach(el=>el.addEventListener('input',updt));
+      const save=async()=>{
+        const pts=getPoints();if(!pts[pi])pts[pi]={};pts[pi].type=row.querySelector('.mct').value;
+        if(isTR){pts[pi].dep=row.querySelector('.mc-d')?.value;pts[pi].ret=row.querySelector('.mc-r')?.value;}
+        else if(isPP){pts[pi].asp=row.querySelector('.mc-a')?.value;pts[pi].ref=row.querySelector('.mc-f')?.value;}
+        else if(isDeb){pts[pi].debit=row.querySelector('.mc-db')?.value;}
+        else if(isAut){pts[pi].libelle=row.querySelector('.mc-lib')?.value;pts[pi].val=row.querySelector('.mc-val')?.value;pts[pi].unite=row.querySelector('.mc-uni')?.value;}
+        else{pts[pi].val=row.querySelector('.mc-v')?.value;}
+        await savePoints(pts);
+      };
+      row.querySelectorAll('input').forEach(el=>el.addEventListener('change',save));
+      row.querySelector('.mct').addEventListener('change',async()=>{const pts=getPoints();pts[pi]={type:row.querySelector('.mct').value};await savePoints(pts);renderPts(pts);});
+      row.querySelector('.mesure-del').addEventListener('click',async()=>{const pts=getPoints();pts.splice(pi,1);await savePoints(pts);renderPts(pts);});
+      updt();block.appendChild(row);
+    });
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter un point de mesure';
+    addBtn.addEventListener('click',async()=>{const pts=getPoints();pts.push({type:TYPES[0]||''});await savePoints(pts);renderPts(pts);});
+    block.appendChild(addBtn);
+  };
+  renderPts(getPoints());parent.appendChild(block);
+}
+
+// ── COURBE DE CHAUFFE ─────────────────────────────────────────────
+function renderCourbeChauffe(field,parent,modId,iIdx){
+  const block=document.createElement('div');block.className='courbe-block';
+  const getPoints=()=>{
+    const lfd=getLocalFd();
+    if(iIdx!==null)return JSON.parse(JSON.stringify(((lfd.repeatData[modId]||[])[iIdx]||{})[field.id]||[{text:-5,dep:null},{text:15,dep:null}]));
+    return JSON.parse(JSON.stringify((lfd.data[modId]||{})[field.id]||[{text:-5,dep:null},{text:15,dep:null}]));
+  };
+  const savePoints=async(pts)=>saveLocalField(modId,field.id,pts,iIdx);
+  const getDecalage=()=>{
+    const lfd=getLocalFd();
+    if(iIdx!==null)return parseFloat(((lfd.repeatData[modId]||[])[iIdx]||{})['reg_decalage']||0)||0;
+    return parseFloat((lfd.data[modId]||{})['reg_decalage']||0)||0;
+  };
+
+  const canvas=document.createElement('canvas');canvas.className='courbe-canvas';canvas.width=380;canvas.height=200;
+
+  const drawCurve=()=>{
+    const ctx=canvas.getContext('2d');const W=canvas.width,H=canvas.height;
+    ctx.clearRect(0,0,W,H);ctx.fillStyle='#0d1b2a';ctx.fillRect(0,0,W,H);
+    const pts=block.querySelectorAll('.courbe-point-row');
+    const decal=getDecalage();
+    const points=[];
+    pts.forEach(row=>{
+      const t=parseFloat(row.querySelector('.c-text').value);
+      const d=parseFloat(row.querySelector('.c-dep').value);
+      if(!isNaN(t)&&!isNaN(d))points.push({t,d:d+decal});
+    });
+    if(points.length<2){ctx.fillStyle='#445566';ctx.font='11px monospace';ctx.textAlign='center';ctx.fillText('Entrez au moins 2 points',W/2,H/2);return;}
+    points.sort((a,b)=>a.t-b.t);
+    const PAD={l:40,r:12,t:16,b:32};
+    // X: by 5°C, Y: 0 always visible, by 10 or 20
+    const minT=Math.floor(Math.min(...points.map(p=>p.t))/5)*5-5;
+    const maxT=Math.ceil(Math.max(...points.map(p=>p.t))/5)*5+5;
+    const minD=Math.min(0,Math.min(...points.map(p=>p.d)));
+    const maxD=Math.max(...points.map(p=>p.d));
+    const rangeD=maxD-minD;
+    const stepD=rangeD>80?20:10;
+    const yStart=Math.floor(minD/stepD)*stepD;
+    const yEnd=Math.ceil(maxD/stepD)*stepD+stepD;
+    const px=t=>PAD.l+(t-minT)/(maxT-minT)*(W-PAD.l-PAD.r);
+    const py=d=>H-PAD.b-(d-yStart)/(yEnd-yStart)*(H-PAD.t-PAD.b);
+    // Grid
+    ctx.strokeStyle='#1e3f5e';ctx.lineWidth=0.8;
+    for(let t=minT;t<=maxT;t+=5){ctx.beginPath();ctx.moveTo(px(t),PAD.t);ctx.lineTo(px(t),H-PAD.b);ctx.stroke();}
+    for(let d=yStart;d<=yEnd;d+=stepD){ctx.beginPath();ctx.moveTo(PAD.l,py(d));ctx.lineTo(W-PAD.r,py(d));ctx.stroke();}
+    // Zero line
+    if(yStart<0&&yEnd>0){ctx.strokeStyle='#2d5a8e';ctx.lineWidth=1.2;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(PAD.l,py(0));ctx.lineTo(W-PAD.r,py(0));ctx.stroke();ctx.setLineDash([]);}
+    // Axes
+    ctx.strokeStyle='#2d5a8e';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(PAD.l,PAD.t);ctx.lineTo(PAD.l,H-PAD.b);ctx.lineTo(W-PAD.r,H-PAD.b);ctx.stroke();
+    // Labels X
+    ctx.fillStyle='#6a90b0';ctx.font='9px monospace';ctx.textAlign='center';
+    for(let t=minT;t<=maxT;t+=5)ctx.fillText(t+'°',px(t),H-PAD.b+11);
+    // Labels Y
+    ctx.textAlign='right';
+    for(let d=yStart;d<=yEnd;d+=stepD)ctx.fillText(d+'°',PAD.l-3,py(d)+3);
+    // Axis titles
+    ctx.fillStyle='#7a95b0';ctx.font='8px monospace';ctx.textAlign='center';
+    ctx.fillText('Text (°C)',W/2,H-1);
+    ctx.save();ctx.translate(8,H/2);ctx.rotate(-Math.PI/2);ctx.fillText('T départ (°C)',0,0);ctx.restore();
+    // Curve
+    ctx.strokeStyle='#1e7fd4';ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.beginPath();
+    points.forEach((p,i)=>i===0?ctx.moveTo(px(p.t),py(p.d)):ctx.lineTo(px(p.t),py(p.d)));ctx.stroke();
+    // Points
+    points.forEach(p=>{
+      ctx.fillStyle='#1e7fd4';ctx.beginPath();ctx.arc(px(p.t),py(p.d),5,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='white';ctx.beginPath();ctx.arc(px(p.t),py(p.d),2,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#e8f0f8';ctx.font='9px monospace';ctx.textAlign='center';
+      ctx.fillText(p.d+'°',px(p.t),py(p.d)-8);
+    });
+    // Decalage label
+    if(decal!==0){ctx.fillStyle='#f97316';ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText(`Décalage: ${decal>0?'+':''}${decal}°`,PAD.l+4,PAD.t+10);}
+  };
+
+  const renderPts=(points)=>{
+    block.innerHTML='<div style="font-family:var(--font-display);font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Points de la courbe</div><div class="courbe-points" id="cp-'+modId+(iIdx!==null?'-'+iIdx:'')+'"></div>';
+    const ptsDiv=block.querySelector('.courbe-points');
+    points.forEach((pt,pi)=>{
+      const row=document.createElement('div');row.className='courbe-point-row';
+      const IS='background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:13px;outline:none;width:100%';
+      row.innerHTML=`<div class="mesure-cell"><label>Text (°C)</label><input type="number" class="c-text" step="1" value="${pt.text!==null&&pt.text!==undefined?pt.text:''}" placeholder="-5" style="${IS}"/></div><div class="mesure-cell"><label>T départ (°C)</label><input type="number" class="c-dep" step="0.5" value="${pt.dep!==null&&pt.dep!==undefined?pt.dep:''}" placeholder="75" style="${IS}"/></div><button class="mesure-del" ${points.length<=2?'style="opacity:.3"':''} ${points.length<=2?'disabled':''}>✕</button>`;
+      row.querySelectorAll('input').forEach(el=>el.addEventListener('change',async()=>{
+        const pts=getPoints();pts[pi]={text:parseFloat(row.querySelector('.c-text').value)||null,dep:parseFloat(row.querySelector('.c-dep').value)||null};
+        await savePoints(pts);drawCurve();
+      }));
+      row.querySelector('.mesure-del').addEventListener('click',async()=>{
+        if(points.length<=2)return;const pts=getPoints();pts.splice(pi,1);await savePoints(pts);renderPts(pts);
+      });
+      ptsDiv.appendChild(row);
+    });
+    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.textContent='+ Ajouter un point';addBtn.style.marginTop='4px';
+    addBtn.addEventListener('click',async()=>{const pts=getPoints();pts.push({text:null,dep:null});await savePoints(pts);renderPts(pts);});
+    block.appendChild(addBtn);
+    block.appendChild(canvas);
+    setTimeout(drawCurve,50);
+  };
+  renderPts(getPoints());parent.appendChild(block);
+}
+
+// ── DÉCALAGE STEPPER ──────────────────────────────────────────────
+function renderDecalageStepper(field,parent,modId,iIdx){
+  const currentVal=parseFloat(getFieldValue(modId,field.id,iIdx))||0;
+  const wrap=document.createElement('div');wrap.className='form-group';
+  wrap.innerHTML=`<label>${esc(field.label)}</label>`;
+  const row=document.createElement('div');row.className='stepper-row';
+  const minus=document.createElement('button');minus.className='stepper-btn';minus.textContent='−';
+  const plus=document.createElement('button');plus.className='stepper-btn';plus.textContent='+';
+  const display=document.createElement('div');display.className='stepper-val';
+  let current=currentVal;
+  display.textContent=(current>=0?'+':'')+current.toFixed(1);
+  const update=async(delta)=>{
+    current=Math.max(-10,Math.min(10,Math.round((current+delta)*2)/2));
+    display.textContent=(current>=0?'+':'')+current.toFixed(1);
+    await saveLocalField(modId,field.id,current,iIdx);
+    // Redraw courbe if present
+    const canvas=parent.closest('.form-block-body')?.querySelector('.courbe-canvas');
+    if(canvas){const c=canvas.getContext('2d');c&&setTimeout(()=>{const ev=new Event('change');canvas.dispatchEvent(ev);},50);}
+  };
+  minus.addEventListener('click',()=>update(-0.5));plus.addEventListener('click',()=>update(0.5));
+  row.appendChild(minus);row.appendChild(display);row.appendChild(plus);
+  wrap.appendChild(row);parent.appendChild(wrap);
+}
+
+// ── COMMENTS ─────────────────────────────────────────────────────
+function buildCommentBlock(commentKey,commentData,modId){
+  const block=document.createElement('div');block.className='comment-block';
+  const tagsRow=document.createElement('div');tagsRow.className='comment-tags';
+  ['✅ Positif','⚠️ Négatif','— Neutre'].forEach((lbl,i)=>{
+    const tag=document.createElement('span');tag.className='ctag '+['pos','neg','neu'][i];tag.textContent=lbl;
+    tag.addEventListener('click',async()=>{
+      const lfd=getLocalFd();const comments=JSON.parse(JSON.stringify((lfd.comments||{})[commentKey]||[]));
+      comments.push({type:['pos','neg','neu'][i],text:''});
+      await saveLocalComment(commentKey,comments);
+      const list=document.getElementById('cl-'+commentKey);if(list){list.innerHTML='';comments.forEach((c,ci)=>list.appendChild(buildCommentEntry(commentKey,c,ci)));}
+    });
+    tagsRow.appendChild(tag);
+  });
+  const list=document.createElement('div');list.id='cl-'+commentKey;
+  commentData.forEach((c,ci)=>list.appendChild(buildCommentEntry(commentKey,c,ci)));
+  block.appendChild(tagsRow);block.appendChild(list);return block;
+}
+function buildCommentEntry(commentKey,c,ci){
+  const row=document.createElement('div');row.className='comment-entry';
+  const tag=document.createElement('span');tag.className=`ctag ${c.type} active`;tag.textContent=c.type==='pos'?'✅':c.type==='neg'?'⚠️':'—';tag.style.alignSelf='flex-start';
+  const ta=document.createElement('textarea');ta.value=c.text||'';ta.placeholder='Commentaire...';ta.rows=2;ta.style.cssText='flex:1;resize:none;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-family:var(--font-body);font-size:12px;outline:none;min-height:48px';
+  const del=document.createElement('button');del.className='btn-del-comment';del.textContent='✕';
+  ta.addEventListener('change',async()=>{const lfd=getLocalFd();const comments=JSON.parse(JSON.stringify((lfd.comments||{})[commentKey]||[]));if(comments[ci])comments[ci].text=ta.value;await saveLocalComment(commentKey,comments);});
+  del.addEventListener('click',async()=>{const lfd=getLocalFd();const comments=JSON.parse(JSON.stringify((lfd.comments||{})[commentKey]||[]));comments.splice(ci,1);await saveLocalComment(commentKey,comments);const list=document.getElementById('cl-'+commentKey);if(list){list.innerHTML='';comments.forEach((cm,j)=>list.appendChild(buildCommentEntry(commentKey,cm,j)));}});
+  row.appendChild(tag);row.appendChild(ta);row.appendChild(del);return row;
+}
+
+// ── CAHIER BLOCK ──────────────────────────────────────────────────
+function renderCahierBlock(mod,wrapper){
+  const block=document.createElement('div');block.className='form-block';
+  const collapsed=isCollapsed(mod.id);
+  const header=document.createElement('div');header.className='form-block-header';header.style.cursor='pointer';
+  header.innerHTML=`<div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;padding:0 4px;line-height:1">${collapsed?'+':'−'}</button>`;
+  const body=document.createElement('div');body.className='form-block-body';if(collapsed)body.style.display='none';
+  header.addEventListener('click',()=>{const c=body.style.display==='none';body.style.display=c?'':'none';header.querySelector('.collapse-btn').textContent=c?'−':'+';setCollapsed(mod.id,!c);});
+
+  const fd=getMFD();const lk=getLocalKey();const lfd=getLocalFd();
+  const years=lfd.cahierYears||{};
+
+  const nbRow=document.createElement('div');nbRow.className='form-group';
+  nbRow.innerHTML=`<label>Années à renseigner</label><input type="number" id="cahier-nb-${lk}" min="1" max="10" value="${Object.keys(years).length||1}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);width:100%;font-size:14px;outline:none"/>`;
+  const btn=document.createElement('button');btn.className='btn-secondary btn-sm';btn.textContent='↻ Actualiser';btn.style.marginBottom='10px';
+  btn.addEventListener('click',async()=>{
+    const nb=parseInt(document.getElementById(`cahier-nb-${lk}`)?.value)||1;
+    const mainFd=getMFD();if(!mainFd.localData)mainFd.localData={};if(!mainFd.localData[lk])mainFd.localData[lk]={data:{},repeatData:{},comments:{},cahierYears:{}};
+    for(let i=0;i<nb;i++){const yr=String(new Date().getFullYear()-i);if(!mainFd.localData[lk].cahierYears[yr])mainFd.localData[lk].cahierYears[yr]={obligations:{}};}
+    await saveMFD(mainFd);
+    // Re-render years without full rebuild
+    const yearsDiv=block.querySelector('.cahier-years');if(yearsDiv){yearsDiv.innerHTML='';renderYears(yearsDiv);}
+  });
+  body.appendChild(nbRow);body.appendChild(btn);
+
+  const puiss=(lfd.data['generalites']||{})['puissance_chaudiere']||'';
+  const oblDefs=OBLIGATIONS_CHAUFFERIE[puiss]||OBLIGATIONS_CHAUFFERIE['≥ 70 kW et < 400 kW'];
+
+  const yearsDiv=document.createElement('div');yearsDiv.className='cahier-years';
+  const renderYears=(container)=>{
+    const lfd2=getLocalFd();const yrs=lfd2.cahierYears||{};
+    Object.keys(yrs).sort().reverse().forEach(yr=>{
+      const yData=yrs[yr];
+      const yBlock=document.createElement('div');yBlock.className='year-block';
+      const yhdr=document.createElement('div');yhdr.className='year-block-header';
+      yhdr.innerHTML=`<span class="year-block-title">📅 Année ${yr}</span><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">▾</span>`;
+      const yBody=document.createElement('div');yBody.className='year-block-body';
+      let yCollapsed=false;yhdr.addEventListener('click',()=>{yCollapsed=!yCollapsed;yBody.className='year-block-body'+(yCollapsed?' collapsed':'');});
+      // Saison
+      [{id:'date_allumage',label:"Date allumage"},{id:'date_arret',label:"Date arrêt"}].forEach(sf=>{
+        const fg=document.createElement('div');fg.className='form-group';
+        fg.innerHTML=`<label>${sf.label}</label><input type="date" value="${yData[sf.id]||''}"/>`;
+        fg.querySelector('input').addEventListener('change',async e=>{
+          const mainFd=getMFD();if(!mainFd.localData?.[lk]?.cahierYears?.[yr])return;
+          mainFd.localData[lk].cahierYears[yr][sf.id]=e.target.value;await saveMFD(mainFd);
+        });
+        yBody.appendChild(fg);
+      });
+      const oblTitle=document.createElement('div');oblTitle.className='form-section-title';oblTitle.textContent='OPÉRATIONS';yBody.appendChild(oblTitle);
+      if(!yData.obligations)yData.obligations={};
+      oblDefs.forEach(obl=>{
+        if(!yData.obligations[obl.id])yData.obligations[obl.id]={freq:obl.freq_default,dates:[]};
+        const oblData=yData.obligations[obl.id];
+        const oblRow=document.createElement('div');oblRow.className='obligation-row';
+        oblRow.innerHTML=`<div class="obligation-header"><span class="obligation-label">${obl.label}</span><select class="obl-freq" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--accent);font-family:var(--font-mono);font-size:11px;outline:none">${FREQ_OPTIONS.map(f=>`<option value="${f}"${f===oblData.freq?' selected':''}>${f}</option>`).join('')}</select></div>`;
+        const datesDiv=document.createElement('div');datesDiv.className='obligation-dates';
+        (oblData.dates||[]).forEach((dv,di)=>{
+          const dr=document.createElement('div');dr.className='obl-date-row';
+          dr.innerHTML=`<span class="obl-date-label">${di+1}.</span><input type="date" value="${dv||''}" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:12px;outline:none"/><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 4px;font-size:12px">✕</button>`;
+          dr.querySelector('input').addEventListener('change',async e=>{const mainFd=getMFD();if(mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id]?.dates)mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates[di]=e.target.value;await saveMFD(mainFd);});
+          dr.querySelector('button').addEventListener('click',async()=>{const mainFd=getMFD();if(mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id]?.dates)mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates.splice(di,1);await saveMFD(mainFd);renderYears(container);});
+          datesDiv.appendChild(dr);
+        });
+        const addDateBtn=document.createElement('button');addDateBtn.className='btn-add-comment';addDateBtn.textContent='+ Ajouter une date';
+        addDateBtn.addEventListener('click',async()=>{const mainFd=getMFD();if(!mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id])return;if(!mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates)mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates=[];mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates.push('');await saveMFD(mainFd);renderYears(container);});
+        oblRow.querySelector('.obl-freq').addEventListener('change',async e=>{const mainFd=getMFD();if(mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id])mainFd.localData[lk].cahierYears[yr].obligations[obl.id].freq=e.target.value;await saveMFD(mainFd);});
+        oblRow.appendChild(datesDiv);oblRow.appendChild(addDateBtn);yBody.appendChild(oblRow);
+      });
+      yBlock.appendChild(yhdr);yBlock.appendChild(yBody);container.appendChild(yBlock);
+    });
+  };
+  renderYears(yearsDiv);body.appendChild(yearsDiv);
+  block.appendChild(header);block.appendChild(body);wrapper.appendChild(block);
+}
+
+// ── LOCAUX SETUP ──────────────────────────────────────────────────
+function renderLocauxSetup(locaux,fd){
+  const container=document.getElementById('locaux-list-container');if(!container)return;
   container.innerHTML='';
   if(!locaux.length){container.innerHTML='<div class="local-empty">Aucun local — appuyez sur + Ajouter</div>';return;}
   locaux.forEach((loc,i)=>{
     const row=document.createElement('div');row.className='local-item';
     row.innerHTML=`<span class="local-item-num">${i+1}</span>`;
-    // Type select
     const sel=document.createElement('select');sel.className='local-item-type';sel.style.flex='1';
     LOCAL_TYPES.forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;if(t===loc.type)o.selected=true;sel.appendChild(o);});
     sel.addEventListener('change',async()=>{const fdd=getMFD();fdd.locaux[i].type=sel.value;await saveMFD(fdd);renderFormsZone();});
-    // Custom name input
-    const nomInp=document.createElement('input');
-    nomInp.type='text';nomInp.placeholder='Nom (ex: Bât A)';nomInp.value=loc.nom||'';
-    nomInp.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text-primary);font-size:12px;outline:none;flex:1;max-width:100px';
+    const nomInp=document.createElement('input');nomInp.type='text';nomInp.placeholder='Nom (ex: Bât A)';nomInp.value=loc.nom||'';
+    nomInp.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text-primary);font-size:12px;outline:none;flex:1;max-width:110px';
     nomInp.addEventListener('change',async()=>{const fdd=getMFD();fdd.locaux[i].nom=nomInp.value;await saveMFD(fdd);renderFormsZone();});
     const del=document.createElement('button');del.className='local-item-del';del.textContent='🗑️';
     del.addEventListener('click',async()=>{
@@ -462,708 +1218,11 @@ function renderLocauxSetup(locaux,fd){
   });
 }
 
-function renderFormBlock(mod,fd,container,saveFn=null,localType='',energie=''){
-  const block=document.createElement('div');block.className='form-block';
-  block.innerHTML=`<div class="form-block-header" style="cursor:pointer" data-collapse="false"><div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" title="Réduire/Agrandir" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:0 4px;line-height:1">−</button></div>`;
-  const blockId=`${mod.id}_${currentMissionId}`;
-  const initCollapsed=collapseState.get(blockId)||false;
-  block.querySelector('.form-block-header').addEventListener('click',function(){
-    const bodyEl=this.nextElementSibling;
-    const isCollapsed=bodyEl?.style.display==='none';
-    collapseState.set(blockId,!isCollapsed);
-    if(bodyEl){bodyEl.style.display=isCollapsed?'':'none';}
-    this.querySelector('.collapse-btn').textContent=isCollapsed?'−':'+';
-  });
-  // Apply saved collapse state
-  if(initCollapsed){
-    const bodyEl=block.querySelector('.form-block-body');
-    if(bodyEl)bodyEl.style.display='none';
-    const btn=block.querySelector('.collapse-btn');
-    if(btn)btn.textContent='+';
-  }
-  const body=document.createElement('div');body.className='form-block-body';block.appendChild(body);container.appendChild(block);
-
-  // Equipment inline at top for modules with hasEquipment
-  if(mod.hasEquipment){
-    renderEquipmentInline(mod.id,body,saveFn);
-    const divider=document.createElement('div');divider.className='form-section-title';divider.textContent='RELEVÉS';body.appendChild(divider);
-  }
-
-  const data=fd.data[mod.id]||{};
-  const allFields=mod.sections?mod.sections.flatMap(s=>[{type:'section',label:s.title},...s.fields]):(mod.fields||[]);
-  allFields.forEach(f=>renderField(f,data,body,mod,fd,null,saveFn,localType,energie));
-  if(mod.notes_field)renderField(mod.notes_field,data,body,mod,fd,null,saveFn,localType,energie);
+// Make refreshAllEquipInline use the block's _refresh method
+function refreshAllEquipInline(){
+  document.querySelectorAll('.equip-inline-block').forEach(block=>{if(block._refresh)block._refresh();});
 }
 
-function renderField(field,data,body,mod,fd,iIdx=null,saveFn=null,localType='',energie=''){
-  // Skip fields based on local type
-  if(field.showForTypes&&localType&&!field.showForTypes.includes(localType))return;
-  // Skip GAZ/CPCU specific fields
-  if(field.showIfEnergie&&energie&&!field.showIfEnergie.some(e=>energie.includes(e)))return;
-
-  if(field.type==='section'){
-    const d=document.createElement('div');d.className='form-section-title';d.textContent=field.label.replace(/^—\s*/,'').replace(/\s*—$/,'');body.appendChild(d);return;
-  }
-  if(field.type==='equipment_inline'){body.appendChild(document.createElement('div'));return;} // handled above
-  if(field.type==='mesures_libres'){renderMesuresLibres(field,data,body,mod,fd,iIdx,saveFn);return;}
-  if(field.type==='mesures_temp'){renderMesuresTemp(field,data,body,mod,fd,iIdx,saveFn);return;}
-  if(field.type==='mesures_chauf'){renderMesuresChauf(field,data,body,mod,fd,iIdx,saveFn);return;}
-  if(field.type==='courbe_chauffe'){renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn);return;}
-  if(field.type==='decalage_stepper'){renderDecalageStepper(field,data,body,mod,fd,iIdx,saveFn);return;}
-
-  const key=iIdx!==null?`${field.id}_${iIdx}`:field.id;
-  const wrap=document.createElement('div');wrap.className='form-group';
-
-  if(field.type==='yesno3'||field.type==='yesno'){
-    wrap.innerHTML=`<label>${esc(field.label)}</label>`;
-    const is4=field.type==='yesno3';
-    const grp=document.createElement('div');grp.className=is4?'yesno4-group':'yesno-group';
-    const storedVal=iIdx!==null?(fd.repeatData[mod.id]?.[iIdx]?.[field.id]||''):(data[field.id]||'');
-    const opts=is4?[['Oui','oui','y'],['Non','non','n'],['N/A','na','na'],['?','pi','pi']]:[['Oui','oui','yes'],['Non','non','no'],['N/A','na','na']];
-    opts.forEach(([lbl,code,cls])=>{
-      const btn=document.createElement('button');btn.className=(is4?'yesno4-btn':'yesno-btn')+' '+cls+(storedVal===code?' active':'');btn.textContent=lbl;
-      btn.addEventListener('click',async()=>{
-        const fdd=getMFD();
-        const lk=`local_${fdd.activeLocalIdx||0}`;
-        const ld=(fdd.localData||{})[lk]||{data:{},repeatData:{}};
-        const target=saveFn?{...fdd,data:JSON.parse(JSON.stringify(ld.data)),repeatData:JSON.parse(JSON.stringify(ld.repeatData))}:fdd;
-        if(iIdx!==null){if(!target.repeatData[mod.id])target.repeatData[mod.id]=[];if(!target.repeatData[mod.id][iIdx])target.repeatData[mod.id][iIdx]={};target.repeatData[mod.id][iIdx][field.id]=code;}
-        else{if(!target.data[mod.id])target.data[mod.id]={};target.data[mod.id][field.id]=code;}
-        saveFn?await saveFn(target):await saveMFD(target);
-        grp.querySelectorAll(is4?'.yesno4-btn':'.yesno-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');
-        if(field.conditional){const condDiv=document.getElementById('cond-'+key);if(condDiv)condDiv.style.display=code===field.conditional.showWhen.value?'flex':'none';}
-      });
-      grp.appendChild(btn);
-    });
-    wrap.appendChild(grp);
-    if(field.conditional){
-      const condDiv=document.createElement('div');condDiv.className='conditional-fields';condDiv.id='cond-'+key;
-      condDiv.style.display=storedVal===field.conditional.showWhen.value?'flex':'none';
-      field.conditional.fields.forEach(cf=>renderField(cf,data,condDiv,mod,fd,iIdx,saveFn));
-      wrap.appendChild(condDiv);
-    }
-    if(mod.withComments){wrap.appendChild(renderCommentBlock(key,((fd.comments||{})[key])||[],fd,mod,saveFn));}
-  }else if(field.type==='computed'||field.type==='computed_validation'){
-    wrap.innerHTML=`<label>${esc(field.label)}</label><div id="cv-${key}" class="computed-value">—</div>`;
-    setTimeout(()=>updateComputed(field,fd,mod,iIdx,key),100);
-  }else{
-    const val=iIdx!==null?(fd.repeatData[mod.id]?.[iIdx]?.[field.id]||''):(data[field.id]||'');
-    if(field.type==='select')wrap.innerHTML=`<label>${esc(field.label)}</label><select id="ff-${key}">${(field.options||[]).map(o=>`<option value="${esc(o)}"${val===o?' selected':''}>${esc(o)}</option>`).join('')}</select>`;
-    else if(field.type==='textarea')wrap.innerHTML=`<label>${esc(field.label)}</label><textarea id="ff-${key}" placeholder="${esc(field.placeholder||'')}" rows="3">${esc(val)}</textarea>`;
-    else wrap.innerHTML=`<label>${esc(field.label)}</label><input type="${field.type==='number'?'number':field.type==='date'?'date':field.type==='time'?'time':'text'}" id="ff-${key}" placeholder="${esc(field.placeholder||field.label)}" value="${esc(val)}" ${field.step?'step='+field.step:''}/>`;
-    const el=wrap.querySelector(`#ff-${key}`);
-    if(el)el.addEventListener('change',async()=>{
-      // Always use fresh getMFD() to avoid stale snapshot overwriting other fields
-      const fdd=getMFD();
-      if(saveFn){
-        // Merge with current localData before saving
-        const lk=`local_${fdd.activeLocalIdx||0}`;
-        const ld=(fdd.localData||{})[lk]||{data:{},repeatData:{}};
-        const fddLocal={...fdd,data:{...ld.data},repeatData:{...ld.repeatData}};
-        if(iIdx!==null){if(!fddLocal.repeatData[mod.id])fddLocal.repeatData[mod.id]=[];if(!fddLocal.repeatData[mod.id][iIdx])fddLocal.repeatData[mod.id][iIdx]={};fddLocal.repeatData[mod.id][iIdx][field.id]=el.value;}
-        else{if(!fddLocal.data[mod.id])fddLocal.data[mod.id]={};fddLocal.data[mod.id][field.id]=el.value;}
-        await saveFn(fddLocal);
-      } else {
-        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=el.value;}
-        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=el.value;}
-        await saveMFD(fdd);
-      }
-      updateAllComputed(mod,fd,iIdx);
-    });
-  }
-  body.appendChild(wrap);
-}
-
-// ── EQUIPMENT INLINE ──────────────────────────────────────────────
-function renderEquipmentInline(moduleId,body,saveFn=null){
-  const block=document.createElement('div');block.className='equip-inline-block';block.dataset.moduleId=moduleId;
-  const mEqs=equipments.filter(e=>e.missionId===currentMissionId&&e.moduleId===moduleId);
-  const listDiv=document.createElement('div');listDiv.className='equip-inline-list';
-  mEqs.forEach(eq=>{
-    const item=document.createElement('div');item.className='equip-inline-item';
-    item.innerHTML=`<div class="equip-inline-name">${esc(eq.name||'—')}</div><div class="equip-inline-meta">${[eq.brand,eq.model].filter(Boolean).join(' · ')}</div><div class="equip-inline-actions"><button class="card-btn" data-id="${eq.id}" data-action="edit">✏️</button><button class="card-btn" data-id="${eq.id}" data-action="delete">🗑️</button></div>`;
-    item.querySelector('[data-action=edit]').addEventListener('click',()=>openEqModal(eq.id,moduleId));
-    item.querySelector('[data-action=delete]').addEventListener('click',async()=>{if(!confirm('Supprimer ?'))return;await dbDel('equipments',eq.id);equipments=equipments.filter(e=>e.id!==eq.id);renderFormsZone();});
-    listDiv.appendChild(item);
-  });
-  const addRow=document.createElement('div');addRow.style.cssText='display:flex;gap:8px';
-  const addBtn=document.createElement('button');addBtn.className='equip-add-btn';addBtn.textContent='+ Saisir manuellement';
-  addBtn.addEventListener('click',()=>openEqModal(null,moduleId));
-  const scanBtn=document.createElement('button');scanBtn.className='equip-scan-btn';scanBtn.textContent='📷 Scanner';
-  scanBtn.addEventListener('click',()=>{editingEqContext=moduleId;openScanForModule(moduleId);});
-  addRow.appendChild(addBtn);addRow.appendChild(scanBtn);
-  block.appendChild(listDiv);block.appendChild(addRow);body.appendChild(block);
-}
-
-function openScanForModule(moduleId){
-  editingEqContext=moduleId;
-  switchMTab('forms'); // stay in forms, open scan sub-modal
-  // Use a floating scan sheet
-  let scanModal=document.getElementById('scan-modal');
-  if(!scanModal){
-    scanModal=document.createElement('div');scanModal.id='scan-modal';
-    scanModal.style.cssText='position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:flex-end';
-    scanModal.innerHTML=`<div style="width:100%;max-width:600px;background:var(--bg-dark);border-radius:16px 16px 0 0;padding:14px;display:flex;flex-direction:column;gap:10px;padding-bottom:calc(14px + env(safe-area-inset-bottom))">
-      <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:var(--font-display);font-size:16px;font-weight:700">📷 Scanner une plaque</span><button id="scan-modal-close" style="background:var(--bg-card);border:1px solid var(--border);border-radius:50%;width:30px;height:30px;color:var(--text-secondary);cursor:pointer;font-size:13px">✕</button></div>
-      <div class="camera-container" style="max-height:40vh"><video id="scan-modal-video" autoplay playsinline style="width:100%;height:100%;object-fit:cover"></video><canvas id="scan-modal-canvas" style="display:none"></canvas><div class="camera-overlay"><div class="scan-frame"><div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div></div></div><div id="scan-modal-placeholder" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:var(--bg-card)"><span style="font-size:32px;opacity:.3">📷</span><p style="color:var(--text-muted);font-size:12px">Caméra non démarrée</p></div></div>
-      <div id="scan-modal-ocr-status" class="ocr-status hidden"><div class="ocr-spinner"></div><span id="scan-modal-ocr-text">Analyse...</span></div>
-      <button class="btn-primary" id="scan-modal-start">🎥 Démarrer caméra</button>
-      <button class="btn-capture hidden" id="scan-modal-capture">📸 Capturer</button>
-      <button class="btn-secondary" id="scan-modal-gallery">🖼️ Depuis la galerie</button>
-      <input type="file" id="scan-modal-file" accept="image/*" capture="environment" style="display:none"/>
-    </div>`;
-    document.body.appendChild(scanModal);
-  }
-  scanModal.style.display='flex';
-  scanModal.querySelector('#scan-modal-close').onclick=()=>{stopScanModal();};
-  scanModal.querySelector('#scan-modal-start').onclick=()=>startScanModal();
-  scanModal.querySelector('#scan-modal-capture').onclick=()=>captureScanModal();
-  scanModal.querySelector('#scan-modal-gallery').onclick=()=>scanModal.querySelector('#scan-modal-file').click();
-  scanModal.querySelector('#scan-modal-file').onchange=e=>{if(e.target.files[0])processImageFileScan(e.target.files[0]);e.target.value='';};
-}
-
-let scanModalStream=null;
-async function startScanModal(){
-  try{
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920}}});
-    scanModalStream=stream;
-    const video=document.getElementById('scan-modal-video');video.srcObject=stream;
-    document.getElementById('scan-modal-placeholder').style.display='none';
-    document.getElementById('scan-modal-start').classList.add('hidden');
-    document.getElementById('scan-modal-capture').classList.remove('hidden');
-  }catch{showToast('Accès caméra refusé','error');}
-}
-function stopScanModal(){
-  if(scanModalStream){scanModalStream.getTracks().forEach(t=>t.stop());scanModalStream=null;}
-  const scanModal=document.getElementById('scan-modal');if(scanModal)scanModal.style.display='none';
-  const v=document.getElementById('scan-modal-video');if(v)v.srcObject=null;
-}
-async function captureScanModal(){
-  const video=document.getElementById('scan-modal-video'),canvas=document.getElementById('scan-modal-canvas');
-  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
-  canvas.getContext('2d').drawImage(video,0,0);
-  stopScanModal();await analyzeImageForModule(canvas.toDataURL('image/jpeg',.9));
-}
-async function processImageFileScan(file){
-  const reader=new FileReader();reader.onload=async e=>{stopScanModal();await analyzeImageForModule(e.target.result);};reader.readAsDataURL(file);
-}
-async function analyzeImageForModule(dataURL){
-  capturedImage=dataURL;
-  let result=null;
-  if(navigator.onLine&&geminiKey){try{result=await analyzeWithGemini(dataURL);}catch(e){console.warn(e);}}
-  if(!result){try{result=await analyzeWithTesseract(dataURL,{textContent:''});}catch(e){}}
-  openEqModal(null,editingEqContext,dataURL);
-  if(result)prefillModal(result);
-}
-
-// ── MESURES LIBRES (accès + mesures supplémentaires dynamiques) ──────
-function renderMesuresLibres(field,data,body,mod,fd,iIdx,saveFn){
-  const block=document.createElement('div');
-  const getCurrentPoints=async()=>{const fdd=getMFD();return(fdd.data[mod.id]||{})[field.id]||[];};
-  const savePoints=async(pts)=>{const fdd=getMFD();if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;saveFn?await saveFn(fdd):await saveMFD(fdd);};
-  const renderPoints=(points)=>{
-    block.innerHTML='';
-    // Header row
-    const hdr=document.createElement('div');
-    hdr.style.cssText='display:grid;grid-template-columns:1fr 1fr 60px 28px;gap:6px;margin-bottom:4px';
-    hdr.innerHTML='<span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Libellé</span><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Valeur</span><span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Unité</span><span></span>';
-    if(points.length)block.appendChild(hdr);
-    points.forEach((pt,pi)=>{
-      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:1fr 1fr 60px 28px;gap:6px;align-items:center;margin-bottom:5px';
-      const iStyle='background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%';
-      row.innerHTML=`<input type="text" class="ml-label" value="${esc(pt.label||'')}" placeholder="Ex: Ø cheminée" style="${iStyle}"/><input type="text" class="ml-val" value="${esc(pt.val||'')}" placeholder="Valeur" style="${iStyle}"/><input type="text" class="ml-unit" value="${esc(pt.unit||'')}" placeholder="cm" style="${iStyle}"/><button class="mesure-del" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px">✕</button>`;
-      const save=async()=>{const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));if(!pts2[pi])pts2[pi]={};pts2[pi].label=row.querySelector('.ml-label').value;pts2[pi].val=row.querySelector('.ml-val').value;pts2[pi].unit=row.querySelector('.ml-unit').value;await savePoints(pts2);};
-      row.querySelectorAll('input').forEach(el=>el.addEventListener('change',save));
-      row.querySelector('.mesure-del').addEventListener('click',async()=>{const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));pts2.splice(pi,1);await savePoints(pts2);renderPoints(pts2);});
-      block.appendChild(row);
-    });
-    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter une mesure';
-    addBtn.addEventListener('click',async()=>{const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));pts2.push({label:'',val:'',unit:''});await savePoints(pts2);renderPoints(pts2);});
-    block.appendChild(addBtn);
-  };
-  renderPoints((fd.data[mod.id]||{})[field.id]||[]);body.appendChild(block);
-}
-
-// ── MESURES TEMP (circuit primaire) ──────────────────────────────
-function renderMesuresTemp(field,data,body,mod,fd,iIdx,saveFn){
-  const key=iIdx!==null?`${field.id}_${iIdx}`:field.id;
-  const stored=iIdx!==null?(fd.repeatData[mod.id]?.[iIdx]?.[field.id]||[]):(data[field.id]||[]);
-  const block=document.createElement('div');
-  const renderPoints=(points)=>{
-    block.innerHTML='';
-    points.forEach((pt,pi)=>{
-      const row=document.createElement('div');row.className='mesure-point';
-      const isAutre=pt.type==='Autre';
-      row.innerHTML=`<div class="mesure-point-header"><select class="mesure-point-type">${(field.pointOptions||[]).map(o=>`<option value="${esc(o)}"${pt.type===o?' selected':''}>${esc(o)}</option>`).join('')}</select><button class="mesure-del">✕</button></div>${isAutre?`<div class="form-group" style="margin-bottom:6px"><label>Libellé</label><input type="text" class="mesure-libelle" value="${esc(pt.libelle||'')}" placeholder="Nom du point" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/></div><div class="form-group" style="margin-bottom:6px"><label>Unité</label><input type="text" class="mesure-unite" value="${esc(pt.unite||'°C')}" placeholder="°C" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/></div>`:''}<div class="mesure-row"><div class="mesure-cell"><label>Départ</label><input type="number" class="mesure-dep" step="0.1" value="${pt.dep||''}" placeholder="—"/></div><div class="mesure-cell"><label>Retour</label><input type="number" class="mesure-ret" step="0.1" value="${pt.ret||''}" placeholder="—"/></div><div class="mesure-cell"><label>ΔT</label><div class="mesure-delta" id="dt-${key}-${pi}">—</div></div></div>`;
-      const updateDT=()=>{const d=parseFloat(row.querySelector('.mesure-dep').value),r=parseFloat(row.querySelector('.mesure-ret').value);const dtEl=document.getElementById(`dt-${key}-${pi}`);if(!isNaN(d)&&!isNaN(r))dtEl.textContent=(d-r).toFixed(1)+' K';else dtEl.textContent='—';};
-      row.querySelector('.mesure-dep').addEventListener('input',updateDT);row.querySelector('.mesure-ret').addEventListener('input',updateDT);
-      const savePoint=async()=>{
-        const fdd=getMFD();
-        const curPts=iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
-        const updPts=JSON.parse(JSON.stringify(curPts));
-        if(!updPts[pi])updPts[pi]={};
-        updPts[pi].type=row.querySelector('.mesure-point-type').value;
-        updPts[pi].libelle=row.querySelector('.mesure-libelle')?.value||'';
-        updPts[pi].unite=row.querySelector('.mesure-unite')?.value||'°C';
-        updPts[pi].dep=row.querySelector('.mesure-dep').value;
-        updPts[pi].ret=row.querySelector('.mesure-ret').value;
-        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=updPts;}
-        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=updPts;}
-        saveFn?await saveFn(fdd):await saveMFD(fdd);
-      };
-      row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',savePoint));
-      row.querySelector('.mesure-del').addEventListener('click',async()=>{
-        const fdd=getMFD();
-        const curPts=iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
-        const pts=JSON.parse(JSON.stringify(curPts));pts.splice(pi,1);
-        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
-        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
-        saveFn?await saveFn(fdd):await saveMFD(fdd);renderPoints(pts);
-      });
-      row.querySelector('.mesure-point-type').addEventListener('change',async()=>{const pts=[...points];pts[pi].type=row.querySelector('.mesure-point-type').value;const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(iIdx!==null){if(!fdd.repeatData[mod.id]?.[iIdx])return;fdd.repeatData[mod.id][iIdx][field.id]=pts;}else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}saveFn?await saveFn(fdd):await saveMFD(fdd);renderPoints(pts);});
-      updateDT();block.appendChild(row);
-    });
-    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter un point de mesure';
-    addBtn.addEventListener('click',async()=>{
-      const fdd=getMFD();
-      const curPts=iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
-      const pts=JSON.parse(JSON.stringify(curPts));
-      pts.push({type:(field.pointOptions||[])[0]||'',dep:'',ret:''});
-      if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
-      else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
-      saveFn?await saveFn(fdd):await saveMFD(fdd);renderPoints(pts);
-    });
-    block.appendChild(addBtn);
-  };
-  renderPoints(stored);body.appendChild(block);
-}
-
-// ── MESURES CHAUFFAGE (dynamiques avec sous-champs selon type) ──────
-function renderMesuresChauf(field,data,body,mod,fd,iIdx,saveFn){
-  const key=iIdx!==null?`${field.id}_${iIdx}`:field.id;
-  const stored=iIdx!==null?((fd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fd.data[mod.id]||{})[field.id]||[];
-  const block=document.createElement('div');
-
-  const savePoints=async(pts)=>{
-    const fdd=getMFD();
-    if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
-    else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
-    saveFn?await saveFn(fdd):await saveMFD(fdd);
-  };
-
-  const renderPoints=(points)=>{
-    block.innerHTML='';
-    points.forEach((pt,pi)=>{
-      const row=document.createElement('div');row.className='mesure-point';
-      const isTempReseau=pt.type==='Températures réseau';
-      const isPression=pt.type==='Pression pompe';
-      const isDebit=pt.type==='Débit';
-      const isAutre=pt.type==='Autre';
-
-      let subFields='';
-      if(isTempReseau){
-        subFields=`<div class="mesure-row">
-          <div class="mesure-cell"><label>Départ (°C)</label><input type="number" class="mc-dep" step="0.1" value="${pt.dep||''}"/></div>
-          <div class="mesure-cell"><label>Retour (°C)</label><input type="number" class="mc-ret" step="0.1" value="${pt.ret||''}"/></div>
-          <div class="mesure-cell"><label>ΔT</label><div class="mesure-delta" id="mcd-${key}-${pi}">—</div></div>
-        </div>`;
-      } else if(isPression){
-        subFields=`<div class="mesure-row">
-          <div class="mesure-cell"><label>Aspiration (bar)</label><input type="number" class="mc-asp" step="0.01" value="${pt.asp||''}"/></div>
-          <div class="mesure-cell"><label>Refoulement (bar)</label><input type="number" class="mc-ref" step="0.01" value="${pt.ref||''}"/></div>
-          <div class="mesure-cell"><label>ΔP</label><div class="mesure-delta" id="mcd-${key}-${pi}">—</div></div>
-        </div>`;
-      } else if(isDebit){
-        subFields=`<div class="mesure-row"><div class="mesure-cell" style="grid-column:1/-1"><label>Débit (m³/h)</label><input type="number" class="mc-debit" step="0.01" value="${pt.debit||''}"/></div></div>`;
-      } else if(isAutre){
-        subFields=`<div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
-          <input type="text" class="mc-libelle" placeholder="Libellé du point" value="${esc(pt.libelle||'')}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%"/>
-          <div style="display:flex;gap:6px"><input type="text" class="mc-val" placeholder="Valeur" value="${esc(pt.val||'')}" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none"/>
-          <input type="text" class="mc-unite" placeholder="Unité" value="${esc(pt.unite||'')}" style="width:70px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none"/></div>
-        </div>`;
-      } else {
-        // Temp ext reg / temp ext réelle (simple value)
-        subFields=`<div class="mesure-row"><div class="mesure-cell" style="grid-column:1/-1"><label>Valeur (°C)</label><input type="number" class="mc-val" step="0.1" value="${pt.val||''}"/></div></div>`;
-      }
-
-      row.innerHTML=`<div class="mesure-point-header">
-        <select class="mesure-point-type">${(field.pointOptions||[]).map(o=>`<option value="${esc(o)}"${pt.type===o?' selected':''}>${esc(o)}</option>`).join('')}</select>
-        <button class="mesure-del">✕</button>
-      </div>${subFields}`;
-
-      // Auto-compute ΔT or ΔP
-      const updateDelta=()=>{
-        const dtEl=document.getElementById(`mcd-${key}-${pi}`);if(!dtEl)return;
-        if(isTempReseau){const d=parseFloat(row.querySelector('.mc-dep')?.value),r=parseFloat(row.querySelector('.mc-ret')?.value);dtEl.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' K':'—';}
-        else if(isPression){const a=parseFloat(row.querySelector('.mc-asp')?.value),r=parseFloat(row.querySelector('.mc-ref')?.value);dtEl.textContent=(!isNaN(a)&&!isNaN(r))?(r-a).toFixed(2)+' bar':'—';}
-      };
-      row.querySelectorAll('input').forEach(el=>el.addEventListener('input',updateDelta));
-
-      const saveRow=async()=>{
-        const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
-        if(!pts2[pi])pts2[pi]={};
-        pts2[pi].type=row.querySelector('.mesure-point-type').value;
-        if(isTempReseau){pts2[pi].dep=row.querySelector('.mc-dep')?.value;pts2[pi].ret=row.querySelector('.mc-ret')?.value;}
-        else if(isPression){pts2[pi].asp=row.querySelector('.mc-asp')?.value;pts2[pi].ref=row.querySelector('.mc-ref')?.value;}
-        else if(isDebit){pts2[pi].debit=row.querySelector('.mc-debit')?.value;}
-        else if(isAutre){pts2[pi].libelle=row.querySelector('.mc-libelle')?.value;pts2[pi].val=row.querySelector('.mc-val')?.value;pts2[pi].unite=row.querySelector('.mc-unite')?.value;}
-        else{pts2[pi].val=row.querySelector('.mc-val')?.value;}
-        await savePoints(pts2);
-      };
-      row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',saveRow));
-
-      row.querySelector('.mesure-point-type').addEventListener('change',async()=>{
-        const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
-        pts2[pi]={type:row.querySelector('.mesure-point-type').value};
-        await savePoints(pts2);renderPoints(pts2);
-      });
-      row.querySelector('.mesure-del').addEventListener('click',async()=>{
-        const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
-        pts2.splice(pi,1);await savePoints(pts2);renderPoints(pts2);
-      });
-
-      updateDelta();block.appendChild(row);
-    });
-
-    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.style.marginTop='4px';addBtn.textContent='+ Ajouter un point de mesure';
-    addBtn.addEventListener('click',async()=>{
-      const pts2=JSON.parse(JSON.stringify(await getCurrentPoints()));
-      pts2.push({type:(field.pointOptions||[])[0]||''});
-      await savePoints(pts2);renderPoints(pts2);
-    });
-    block.appendChild(addBtn);
-  };
-
-  const getCurrentPoints=async()=>{
-    const fdd=getMFD();
-    return iIdx!==null?((fdd.repeatData[mod.id]||[])[iIdx]||{})[field.id]||[]:(fdd.data[mod.id]||{})[field.id]||[];
-  };
-
-  renderPoints(stored);body.appendChild(block);
-}
-
-// ── COURBE DE CHAUFFE ─────────────────────────────────────────────
-function renderCourbeChauffe(field,data,body,mod,fd,iIdx,saveFn){
-  const key=iIdx!==null?`${field.id}_${iIdx}`:field.id;
-  const stored=iIdx!==null?(fd.repeatData[mod.id]?.[iIdx]?.[field.id]||[{text:-5,dep:null},{text:15,dep:null}]):(data[field.id]||[{text:-5,dep:null},{text:15,dep:null}]);
-  const block=document.createElement('div');block.className='courbe-block';
-  const canvas=document.createElement('canvas');canvas.className='courbe-canvas';canvas.width=400;canvas.height=200;
-
-  const PAD={l:46,r:16,t:20,b:36};
-  const drawCurve=()=>{
-    const W=canvas.width,H=canvas.height;
-    const ctx=canvas.getContext('2d');
-    ctx.clearRect(0,0,W,H);
-    // Background
-    ctx.fillStyle='#0d1b2a';ctx.fillRect(0,0,W,H);
-    const pts=block.querySelectorAll('.courbe-point-row');
-    const points=[];
-    // Get decalage value from the stepper
-    let decalage=0;
-    const decalageEl=block.closest('.form-block-body')?.querySelector('.stepper-val');
-    if(decalageEl)decalage=parseFloat(decalageEl.textContent)||0;
-    pts.forEach(row=>{
-      const t=parseFloat(row.querySelector('.c-text').value);
-      const d=parseFloat(row.querySelector('.c-dep').value);
-      if(!isNaN(t)&&!isNaN(d))points.push({t,d:d+decalage}); // apply parallel shift
-    });
-    if(points.length<2){
-      ctx.fillStyle='#445566';ctx.font='12px monospace';ctx.textAlign='center';
-      ctx.fillText('Entrez au moins 2 points pour afficher la courbe',W/2,H/2);
-      return;
-    }
-    points.sort((a,b)=>a.t-b.t);
-    const minT=Math.min(...points.map(p=>p.t));
-    const maxT=Math.max(...points.map(p=>p.t));
-    const minD=Math.min(...points.map(p=>p.d));
-    const maxD=Math.max(...points.map(p=>p.d));
-    const padT=(maxT-minT)*0.1||5, padD=(maxD-minD)*0.1||5;
-    const x0=minT-padT, x1=maxT+padT;
-    const y0=minD-padD, y1=maxD+padD;
-    const px=t=>PAD.l+(t-x0)/(x1-x0)*(W-PAD.l-PAD.r);
-    const py=d=>H-PAD.b-(d-y0)/(y1-y0)*(H-PAD.t-PAD.b);
-    // Grid & axes
-    ctx.strokeStyle='#1e3f5e';ctx.lineWidth=1;
-    // Fixed step: X by 5°C, Y by 10 or 20°C depending on range
-    const rangeT=x1-x0,rangeD=y1-y0;
-    const stepT=5; // always 5°C on X
-    const stepD=rangeD>100?20:10; // 20 if large range, else 10
-    // Ensure Y includes 0 if range allows
-    const yMin=Math.min(y0,0);const yMax=Math.max(y1,0);
-    const yStart=Math.floor(yMin/stepD)*stepD;
-    const yEnd=Math.ceil(yMax/stepD)*stepD;
-    // Recalc px/py with expanded range including 0
-    const px2=t=>PAD.l+(t-x0)/(x1-x0)*(W-PAD.l-PAD.r);
-    const py2=d=>H-PAD.b-(d-yStart)/(yEnd-yStart)*(H-PAD.t-PAD.b);
-    // Reassign px/py
-    Object.assign(window,{_px:px2,_py:py2});
-
-    // X grid ticks (by 5°C)
-    for(let t=Math.ceil(x0/stepT)*stepT;t<=x1;t+=stepT){
-      ctx.beginPath();ctx.moveTo(px2(t),PAD.t);ctx.lineTo(px2(t),H-PAD.b);ctx.stroke();
-    }
-    // Y grid ticks
-    for(let d=yStart;d<=yEnd;d+=stepD){
-      ctx.beginPath();ctx.moveTo(PAD.l,py2(d));ctx.lineTo(W-PAD.r,py2(d));ctx.stroke();
-    }
-    // Axes
-    ctx.strokeStyle='#2d5a8e';ctx.lineWidth=1.5;
-    ctx.beginPath();ctx.moveTo(PAD.l,PAD.t);ctx.lineTo(PAD.l,H-PAD.b);ctx.lineTo(W-PAD.r,H-PAD.b);ctx.stroke();
-    // Zero line on Y (prominent)
-    if(yStart<0&&yEnd>0){ctx.strokeStyle='#3b82f6';ctx.lineWidth=1.5;ctx.setLineDash([4,3]);ctx.beginPath();ctx.moveTo(PAD.l,py2(0));ctx.lineTo(W-PAD.r,py2(0));ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#3b82f6';ctx.font='9px monospace';ctx.textAlign='right';ctx.fillText('0°',PAD.l-4,py2(0)+3);}
-    // Axis labels
-    ctx.fillStyle='#6a90b0';ctx.font='10px monospace';ctx.textAlign='center';
-    for(let t=Math.ceil(x0/stepT)*stepT;t<=x1;t+=stepT){
-      ctx.fillText(t+'°',px2(t),H-PAD.b+12);
-    }
-    ctx.textAlign='right';
-    for(let d=yStart;d<=yEnd;d+=stepD){
-      ctx.fillText(d+'°',PAD.l-4,py2(d)+3);
-    }
-    // Axis titles
-    ctx.fillStyle='#7a95b0';ctx.font='9px monospace';ctx.textAlign='center';
-    ctx.fillText('Temp. extérieure (°C)',W/2,H-2);
-    ctx.save();ctx.translate(11,H/2);ctx.rotate(-Math.PI/2);
-    ctx.fillText('T départ (°C)',0,0);ctx.restore();
-    // Zero line if visible
-    if(x0<0&&x1>0){ctx.strokeStyle='#2d5a8e';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(px(0),PAD.t);ctx.lineTo(px(0),H-PAD.b);ctx.stroke();ctx.setLineDash([]);}
-    // Curve
-    const pxF=window._px||px,pyF=window._py||py;
-    ctx.strokeStyle='#1e7fd4';ctx.lineWidth=2.5;ctx.lineJoin='round';
-    ctx.beginPath();points.forEach((p,i)=>{i===0?ctx.moveTo(pxF(p.t),pyF(p.d)):ctx.lineTo(pxF(p.t),pyF(p.d));});ctx.stroke();
-    // Data points with labels
-    points.forEach(p=>{
-      ctx.fillStyle='#1e7fd4';ctx.beginPath();ctx.arc(pxF(p.t),pyF(p.d),5,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='white';ctx.beginPath();ctx.arc(pxF(p.t),pyF(p.d),2,0,Math.PI*2);ctx.fill();
-      ctx.fillStyle='#e8f0f8';ctx.font='9px monospace';ctx.textAlign='center';
-      ctx.fillText(p.d+'°',pxF(p.t),pyF(p.d)-8);
-    });
-    delete window._px;delete window._py;
-  };
-
-  const renderPts=(points)=>{
-    block.innerHTML='<div class="form-section-title" style="margin-bottom:6px">Points de la courbe</div><div class="courbe-points" id="courbe-pts-'+key+'"></div>';
-    const ptsDiv=block.querySelector('.courbe-points');
-    points.forEach((pt,pi)=>{
-      const row=document.createElement('div');row.className='courbe-point-row';
-      row.innerHTML=`<div class="mesure-cell"><label>Text (°C)</label><input type="number" class="c-text" step="1" value="${pt.text!==null&&pt.text!==undefined?pt.text:''}" placeholder="ex: -5" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/></div><div class="mesure-cell"><label>T départ (°C)</label><input type="number" class="c-dep" step="0.5" value="${pt.dep!==null&&pt.dep!==undefined?pt.dep:''}" placeholder="ex: 75" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:7px 8px;color:var(--text-primary);font-size:13px;outline:none;width:100%"/></div><button class="mesure-del" ${points.length<=2?'disabled style="opacity:.3"':''}>✕</button>`;
-      row.querySelectorAll('input').forEach(el=>el.addEventListener('change',async()=>{
-        const updPts=[];block.querySelectorAll('.courbe-point-row').forEach(r=>{updPts.push({text:parseFloat(r.querySelector('.c-text').value)||null,dep:parseFloat(r.querySelector('.c-dep').value)||null});});
-        const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-        if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=updPts;}
-        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=updPts;}
-        saveFn?await saveFn(fdd):await saveMFD(fdd);drawCurve();
-      }));
-      row.querySelector('.mesure-del').addEventListener('click',async()=>{
-        if(points.length<=2)return;
-        const pts=[...points];pts.splice(pi,1);
-        const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-        if(iIdx!==null){if(!fdd.repeatData[mod.id]?.[iIdx])return;fdd.repeatData[mod.id][iIdx][field.id]=pts;}
-        else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
-        saveFn?await saveFn(fdd):await saveMFD(fdd);renderPts(pts);
-      });
-      ptsDiv.appendChild(row);
-    });
-    const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.textContent='+ Ajouter un point';addBtn.style.marginTop='4px';
-    addBtn.addEventListener('click',async()=>{
-      const pts=[...points,{text:null,dep:null}];
-      const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-      if(iIdx!==null){if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];if(!fdd.repeatData[mod.id][iIdx])fdd.repeatData[mod.id][iIdx]={};fdd.repeatData[mod.id][iIdx][field.id]=pts;}
-      else{if(!fdd.data[mod.id])fdd.data[mod.id]={};fdd.data[mod.id][field.id]=pts;}
-      saveFn?await saveFn(fdd):await saveMFD(fdd);renderPts(pts);
-    });
-    block.appendChild(addBtn);
-    block.appendChild(canvas);
-    setTimeout(drawCurve,50);
-  };
-  renderPts(stored);body.appendChild(block);
-}
-
-function renderDecalageStepper(field,data,body,mod,fd,iIdx,saveFn){
-  const val=parseFloat(data[field.id])||0;
-  const wrap=document.createElement('div');wrap.className='form-group';
-  wrap.innerHTML=`<label>${esc(field.label)}</label>`;
-  const row=document.createElement('div');row.className='stepper-row';
-  const minus=document.createElement('button');minus.className='stepper-btn';minus.textContent='−';
-  const plus=document.createElement('button');plus.className='stepper-btn';plus.textContent='+';
-  display.textContent=(val>=0?'+':'')+val.toFixed(1);
-  const display=document.createElement('div');display.className='stepper-val';display.textContent=val.toFixed(1);
-  let current=val;
-  const update=async(delta)=>{
-    current=Math.max(-10,Math.min(10,Math.round((current+delta)*2)/2));
-    display.textContent=(current>=0?'+':'')+current.toFixed(1);
-    const fdd=getMFD();
-    const lk=`local_${fdd.activeLocalIdx||0}`;const ld=(fdd.localData||{})[lk]||{data:{}};
-    const target=saveFn?{...fdd,data:JSON.parse(JSON.stringify(ld.data))}:fdd;
-    if(!target.data[mod.id])target.data[mod.id]={};target.data[mod.id][field.id]=current;
-    saveFn?await saveFn(target):await saveMFD(target);
-    // Trigger curve redraw if visible
-    const canvas=wrap.closest('.form-block-body')?.querySelector('.courbe-canvas');
-    if(canvas){const ev=new Event('redraw');canvas.dispatchEvent(ev);}
-  };
-  minus.addEventListener('click',()=>update(-0.5));plus.addEventListener('click',()=>update(0.5));
-  row.appendChild(minus);row.appendChild(display);row.appendChild(plus);
-  wrap.appendChild(row);body.appendChild(wrap);
-}
-
-function renderCommentBlock(key,commentData,fd,mod,saveFn=null){
-  const block=document.createElement('div');block.className='comment-block';
-  const tagsRow=document.createElement('div');tagsRow.className='comment-tags';
-  ['✅ Positif','⚠️ Négatif','— Neutre'].forEach((lbl,i)=>{
-    const tag=document.createElement('span');tag.className='ctag '+['pos','neg','neu'][i];tag.textContent=lbl;
-    tag.addEventListener('click',async()=>{
-      const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();
-      if(!fdd.comments)fdd.comments={};if(!fdd.comments[key])fdd.comments[key]=[];
-      fdd.comments[key].push({type:['pos','neg','neu'][i],text:''});
-      saveFn?await saveFn(fdd):await saveMFD(fdd);
-      const list=document.getElementById('clist-'+key);if(list){const c=fdd.comments[key];list.innerHTML='';c.forEach((cm,ci)=>list.appendChild(buildCommentEntry(key,cm,ci,fdd,mod,saveFn)));}
-    });
-    tagsRow.appendChild(tag);
-  });
-  const list=document.createElement('div');list.id='clist-'+key;
-  commentData.forEach((c,ci)=>list.appendChild(buildCommentEntry(key,c,ci,fd,mod,saveFn)));
-  block.appendChild(tagsRow);block.appendChild(list);return block;
-}
-function buildCommentEntry(key,c,ci,fd,mod,saveFn=null){
-  const row=document.createElement('div');row.className='comment-entry';
-  const typeTag=document.createElement('span');typeTag.className=`ctag ${c.type} active`;typeTag.textContent=c.type==='pos'?'✅':c.type==='neg'?'⚠️':'—';typeTag.style.alignSelf='flex-start';
-  const ta=document.createElement('textarea');ta.value=c.text||'';ta.placeholder='Commentaire...';ta.rows=2;
-  ta.style.cssText='flex:1;resize:none;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-family:var(--font-body);font-size:12px;outline:none;min-height:50px';
-  const del=document.createElement('button');del.className='btn-del-comment';del.textContent='✕';
-  ta.addEventListener('change',async()=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(fdd.comments?.[key]?.[ci])fdd.comments[key][ci].text=ta.value;saveFn?await saveFn(fdd):await saveMFD(fdd);});
-  del.addEventListener('click',async()=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(fdd.comments?.[key])fdd.comments[key].splice(ci,1);saveFn?await saveFn(fdd):await saveMFD(fdd);const list=document.getElementById('clist-'+key);if(list){list.innerHTML='';(fdd.comments?.[key]||[]).forEach((cm,j)=>list.appendChild(buildCommentEntry(key,cm,j,fdd,mod,saveFn)));}});
-  row.appendChild(typeTag);row.appendChild(ta);row.appendChild(del);return row;
-}
-
-function updateComputed(field,fd,mod,iIdx,key){
-  const el=document.getElementById('cv-'+key);if(!el)return;
-  const allF=mod.fields||[...(mod.sections||[]).flatMap(s=>s.fields)];
-  const vars={};allF.forEach(f=>{const k=iIdx!==null?`ff-${f.id}_${iIdx}`:`ff-${f.id}`;const inp=document.getElementById(k);if(inp){const v=parseFloat(inp.value);if(!isNaN(v))vars[f.id]=v;}});
-  try{
-    const result=new Function(...Object.keys(vars),'return '+field.formula)(...Object.values(vars));
-    if(field.type==='computed_validation'){
-      const fdG=(getMFD().data['generalites'])||{};
-      const puissMap={'< 70 kW':50,'≥ 70 kW et < 400 kW':200,'≥ 400 kW et < 1 MW':700,'≥ 1 MW':1500};
-      const puissKw=puissMap[fdG['puissance_chaudiere']]||0;
-      const section=isNaN(result)?0:result;
-      if(!puissKw||!section){el.innerHTML='<span class="validation-na">Renseigner la puissance</span>';return;}
-      const required=field.rule==='ventilation_vh'?puissKw*6:puissKw*3;
-      el.innerHTML=section>=required?`<span class="validation-ok">✅ ${Math.round(section)} cm² ≥ ${Math.round(required)} cm²</span>`:`<span class="validation-ko">❌ ${Math.round(section)} cm² < ${Math.round(required)} cm²</span>`;
-    }else{el.textContent=isNaN(result)?'—':(Math.round(result*100)/100)+' '+(field.unit||'');}
-  }catch{el.textContent='—';}
-}
-function updateAllComputed(mod,fd,iIdx){
-  const af=mod.fields||[...(mod.sections||[]).flatMap(s=>s.fields)];
-  af.filter(f=>f.type==='computed'||f.type==='computed_validation').forEach(f=>{const key=iIdx!==null?`${f.id}_${iIdx}`:f.id;updateComputed(f,fd,mod,iIdx,key);});
-}
-
-function renderRepeatableBlock(mod,fd,container,saveFn=null,localType='',energie=''){
-  const instances=fd.repeatData[mod.id]||[{}];
-  const block=document.createElement('div');block.className='form-block';
-  const header=document.createElement('div');header.className='form-block-header';header.style.cursor='pointer';header.dataset.collapse='false';
-  header.innerHTML=`<div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div><button class="collapse-btn" style="background:none;border:none;color:var(--text-muted);font-size:16px;cursor:pointer;padding:0 4px;line-height:1">−</button>`;
-  const repBlockId=`${mod.id}_rep_${currentMissionId}`;
-  const repInitCollapsed=collapseState.get(repBlockId)||false;
-  header.addEventListener('click',function(){
-    const isCollapsed=body?.style.display==='none';
-    collapseState.set(repBlockId,!isCollapsed);
-    if(body){body.style.display=isCollapsed?'':'none';}
-    this.querySelector('.collapse-btn').textContent=isCollapsed?'−':'+';
-  });
-  block.appendChild(header);const body=document.createElement('div');body.className='form-block-body';block.appendChild(body);container.appendChild(block);
-  instances.forEach((_,idx)=>{
-    const inst=document.createElement('div');inst.className='repeat-instance';
-    const instTitle=document.createElement('div');instTitle.className='repeat-instance-title';
-    instTitle.innerHTML=`<span style="color:${mod.color}">${mod.repeatLabel} ${idx+1}</span>`;
-    if(instances.length>1){const del=document.createElement('button');del.className='btn-remove-instance';del.textContent='✕';del.addEventListener('click',async()=>{
-        const fdd=getMFD();
-        if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];
-        fdd.repeatData[mod.id].splice(idx,1);
-        saveFn?await saveFn(fdd):await saveMFD(fdd);
-        renderFormsZone();
-      });instTitle.appendChild(del);}
-    inst.appendChild(instTitle);
-    // Equipment inline for hasEquipment repeatable modules
-    if(mod.hasEquipment)renderEquipmentInline(mod.id+`_${idx}`,inst,saveFn);
-    mod.fields.forEach(f=>renderField(f,fd.data,inst,mod,fd,idx,saveFn,localType,energie));body.appendChild(inst);
-  });
-  const addBtn=document.createElement('button');addBtn.className='btn-add-instance';addBtn.textContent=`+ Ajouter ${mod.repeatLabel}`;
-  addBtn.addEventListener('click',async()=>{
-    // Always use fresh getMFD, never stale snapshot
-    const fdd=getMFD();
-    if(!fdd.repeatData[mod.id])fdd.repeatData[mod.id]=[];
-    fdd.repeatData[mod.id].push({});
-    saveFn?await saveFn(fdd):await saveMFD(fdd);
-    // Re-render only this block, not the whole zone
-    const newFd=getMFD();
-    const localKey=`local_${newFd.activeLocalIdx||0}`;
-    const localDataEntry=(newFd.localData||{})[localKey]||{data:{},repeatData:{},comments:{},cahierYears:{}};
-    const freshFd={id:newFd.id,activeModules:newFd.localModules?.[localKey]||[],data:localDataEntry.data||{},repeatData:localDataEntry.repeatData||{},comments:localDataEntry.comments||{},cahierYears:localDataEntry.cahierYears||{}};
-    const freshSave=async(fdd2)=>{const mf=getMFD();if(!mf.localData)mf.localData={};const ex=mf.localData[localKey]||{};mf.localData[localKey]={...ex,data:fdd2.data,repeatData:fdd2.repeatData,comments:fdd2.comments||{},cahierYears:fdd2.cahierYears||{}};await saveMFD(mf);};
-    // Replace this block in DOM
-    const newBlock=document.createElement('div');
-    renderRepeatableBlock(mod,freshFd,newBlock,freshSave,currentLocalType||'',currentEnergie||'');
-    block.replaceWith(newBlock.firstChild||newBlock);
-  });
-  body.appendChild(addBtn);
-}
-
-function renderCahierBlock(mod,fd,container,saveFn=null){
-  const block=document.createElement('div');block.className='form-block';
-  block.innerHTML=`<div class="form-block-header"><div class="form-block-title" style="color:${mod.color}">${mod.icon} ${mod.label}</div></div><div class="form-block-body" id="fb-cahier"></div>`;
-  container.appendChild(block);
-  const body=document.getElementById('fb-cahier');
-  const years=fd.cahierYears||{};
-  const nbRow=document.createElement('div');nbRow.className='form-group';
-  nbRow.innerHTML=`<label>Années à renseigner</label><input type="number" id="cahier-nb-years" min="1" max="10" value="${Object.keys(years).length||1}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);width:100%;font-size:14px;outline:none"/>`;
-  body.appendChild(nbRow);
-  const btn=document.createElement('button');btn.className='btn-secondary btn-sm';btn.textContent='↻ Actualiser';btn.style.marginBottom='10px';
-  btn.addEventListener('click',async()=>{
-    const nb=parseInt(document.getElementById('cahier-nb-years').value)||1;
-    const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(!fdd.cahierYears)fdd.cahierYears={};
-    for(let i=0;i<nb;i++){const yr=new Date().getFullYear()-i;const k=String(yr);if(!fdd.cahierYears[k])fdd.cahierYears[k]={year:yr,obligations:{}};}
-    saveFn?await saveFn(fdd):await saveMFD(fdd);renderFormsZone();
-  });
-  body.appendChild(btn);
-  const fdG=fd.data['generalites']||{};
-  const puiss=fdG['puissance_chaudiere']||'';
-  const obligations=OBLIGATIONS_CHAUFFERIE[puiss]||OBLIGATIONS_CHAUFFERIE['≥ 70 kW et < 400 kW'];
-  Object.keys(years).sort().reverse().forEach(yr=>{
-    const yData=years[yr];
-    const yBlock=document.createElement('div');yBlock.className='year-block';
-    const yhdr=document.createElement('div');yhdr.className='year-block-header';
-    yhdr.innerHTML=`<span class="year-block-title">📅 Année ${yr}</span><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">▾</span>`;
-    const yBody=document.createElement('div');yBody.className='year-block-body';
-    let collapsed=false;yhdr.addEventListener('click',()=>{collapsed=!collapsed;yBody.className='year-block-body'+(collapsed?' collapsed':'');});
-    [{id:'date_allumage',label:"Date d'allumage",type:'date'},{id:'date_arret',label:"Date d'arrêt",type:'date'}].forEach(sf=>{
-      const fg=document.createElement('div');fg.className='form-group';
-      fg.innerHTML=`<label>${sf.label}</label><input type="date" value="${yData[sf.id]||''}" />`;
-      fg.querySelector('input').addEventListener('change',async e=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(!fdd.cahierYears[yr])fdd.cahierYears[yr]={};fdd.cahierYears[yr][sf.id]=e.target.value;saveFn?await saveFn(fdd):await saveMFD(fdd);});
-      yBody.appendChild(fg);
-    });
-    const oblTitle=document.createElement('div');oblTitle.className='form-section-title';oblTitle.textContent='OPÉRATIONS';yBody.appendChild(oblTitle);
-    if(!yData.obligations)yData.obligations={};
-    obligations.forEach(obl=>{
-      if(!yData.obligations[obl.id])yData.obligations[obl.id]={freq:obl.freq_default,dates:[]};
-      const oblData=yData.obligations[obl.id];
-      const oblRow=document.createElement('div');oblRow.className='obligation-row';
-      oblRow.innerHTML=`<div class="obligation-header"><span class="obligation-label">${obl.label}</span><select class="obl-freq-sel" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--accent);font-family:var(--font-mono);font-size:11px;outline:none">${FREQ_OPTIONS.map(f=>`<option value="${f}"${f===oblData.freq?' selected':''}>${f}</option>`).join('')}</select></div>`;
-      const datesDiv=document.createElement('div');datesDiv.className='obligation-dates';
-      (oblData.dates||[]).forEach((dateVal,di)=>{
-        const dr=document.createElement('div');dr.className='obl-date-row';
-        dr.innerHTML=`<span class="obl-date-label">${di+1}.</span><input type="date" value="${dateVal||''}" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:12px;outline:none"/><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 4px;font-size:12px">✕</button>`;
-        dr.querySelector('input').addEventListener('change',async e=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(fdd.cahierYears?.[yr]?.obligations?.[obl.id]?.dates)fdd.cahierYears[yr].obligations[obl.id].dates[di]=e.target.value;saveFn?await saveFn(fdd):await saveMFD(fdd);});
-        dr.querySelector('button').addEventListener('click',async()=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(fdd.cahierYears?.[yr]?.obligations?.[obl.id]?.dates)fdd.cahierYears[yr].obligations[obl.id].dates.splice(di,1);saveFn?await saveFn(fdd):await saveMFD(fdd);renderFormsZone();});
-        datesDiv.appendChild(dr);
-      });
-      const addDateBtn=document.createElement('button');addDateBtn.className='btn-add-comment';addDateBtn.textContent='+ Ajouter une date';
-      addDateBtn.addEventListener('click',async()=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(!fdd.cahierYears?.[yr]?.obligations?.[obl.id])return;if(!fdd.cahierYears[yr].obligations[obl.id].dates)fdd.cahierYears[yr].obligations[obl.id].dates=[];fdd.cahierYears[yr].obligations[obl.id].dates.push('');saveFn?await saveFn(fdd):await saveMFD(fdd);renderFormsZone();});
-      oblRow.querySelector('.obl-freq-sel').addEventListener('change',async e=>{const fdd=saveFn?JSON.parse(JSON.stringify(fd)):getMFD();if(fdd.cahierYears?.[yr]?.obligations?.[obl.id])fdd.cahierYears[yr].obligations[obl.id].freq=e.target.value;saveFn?await saveFn(fdd):await saveMFD(fdd);});
-      oblRow.appendChild(datesDiv);oblRow.appendChild(addDateBtn);yBody.appendChild(oblRow);
-    });
-    yBlock.appendChild(yhdr);yBlock.appendChild(yBody);body.appendChild(yBlock);
-  });
-}
 
 // ── MODALS ────────────────────────────────────────────────────────
 function openSiteModal(id=null){
@@ -1262,9 +1321,9 @@ async function saveEquipment(){
   const eq={id:editingEqId||uid(),missionId:currentMissionId,moduleId:baseModId,moduleContext:rawModId,category:v('field-category'),name,brand:v('field-brand'),model:v('field-model'),serial:v('field-serial'),year:vn('field-year'),power:v('field-power'),fluid:v('field-fluid'),location:v('field-location'),condition:v('field-condition'),notes:v('field-notes'),ocrRaw:v('field-ocr-raw'),photo:attachedPhoto||null,updatedAt:now(),createdAt:editingEqId?(equipments.find(e=>e.id===editingEqId)?.createdAt||now()):now()};
   await dbPut('equipments',eq);if(editingEqId){const i=equipments.findIndex(e=>e.id===editingEqId);if(i>=0)equipments[i]=eq;else equipments.push(eq);}else equipments.push(eq);
   capturedImage=null;document.getElementById('modal-equipment').classList.add('hidden');
-  renderFormsZone();showToast(editingEqId?'Équipement mis à jour ✓':'Équipement ajouté ✓','success');
+  refreshAllEquipInline();showToast(editingEqId?'Équipement mis à jour ✓':'Équipement ajouté ✓','success');
 }
-async function deleteEquipment(id){if(!confirm('Supprimer ?'))return;await dbDel('equipments',id);equipments=equipments.filter(e=>e.id!==id);renderSynthesis();showToast('Supprimé');}
+async function deleteEquipment(id){if(!confirm('Supprimer ?'))return;await dbDel('equipments',id);equipments=equipments.filter(e=>e.id!==id);refreshAllEquipInline();renderSynthesis();showToast('Supprimé');}
 
 document.getElementById('btn-attach-photo')?.addEventListener('click',()=>document.getElementById('attach-file-input').click());
 document.getElementById('attach-file-input')?.addEventListener('change',e=>{

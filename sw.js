@@ -1,5 +1,5 @@
 const CACHE='adiatool-v3';
-const ASSETS=['./', './index.html','./style.css','./app.js','./forms-data.js','./logo.js','./manifest.json'];
+const ASSETS=['./', './index.html','./style.css','./app.js','./forms-data.js','./forms-engine.js','./logo.js','./manifest.json'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>Promise.allSettled(ASSETS.map(u=>c.add(u)))).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==CACHE).map(x=>caches.delete(x)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{
