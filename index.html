@@ -86,47 +86,36 @@
   <!-- MISSION -->
   <div id="view-mission" class="view">
     <nav class="tabs" id="mission-tabs-nav">
-      <button class="tab active" data-mtab="equipments">🔧 Matériels</button>
-      <button class="tab" data-mtab="scan">📷 Scan</button>
+      <button class="tab active" data-mtab="participants">👥 Participants</button>
       <button class="tab" data-mtab="forms">📝 Relevés</button>
+      <button class="tab" data-mtab="synthesis">🔧 Matériels</button>
       <button class="tab" data-mtab="notes">✏️ Notes</button>
       <button class="tab" data-mtab="photos">🖼️ Photos</button>
       <button class="tab" data-mtab="incident" style="display:none" id="tab-incident-btn">🚨 Incident</button>
       <button class="tab" data-mtab="report">📄 Rapport</button>
     </nav>
 
-    <!-- MATÉRIELS -->
-    <div id="mtab-equipments" class="tab-content active">
-      <div class="list-toolbar">
-        <input type="text" id="eq-search" placeholder="🔍 Rechercher..."/>
-        <select id="eq-filter-cat"><option value="">Toutes</option></select>
+    <!-- PARTICIPANTS -->
+    <div id="mtab-participants" class="tab-content active">
+      <div class="participants-zone">
+        <div class="participants-header">
+          <h2>👥 Participants à la visite</h2>
+          <p>Personnes présentes lors de cette mission</p>
+        </div>
+        <div id="participants-list" style="display:flex;flex-direction:column;gap:8px;padding:14px"></div>
+        <div style="padding:0 14px 20px">
+          <button class="btn-add-instance" id="btn-add-participant">+ Ajouter une personne</button>
+        </div>
       </div>
-      <div id="mission-eq-list" class="card-list" style="padding-bottom:80px"></div>
-      <button class="fab" id="btn-add-eq">＋</button>
     </div>
 
-    <!-- SCAN -->
-    <div id="mtab-scan" class="tab-content">
-      <div class="scan-zone">
-        <div class="scan-header"><h2>Scanner une plaque</h2><p>Photographiez la plaque signalétique</p></div>
-        <div class="camera-container">
-          <video id="camera-preview" autoplay playsinline></video>
-          <canvas id="camera-canvas"></canvas>
-          <div class="camera-overlay">
-            <div class="scan-frame"><div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div></div>
-            <p class="scan-hint">Centrez la plaque dans le cadre</p>
-          </div>
-          <div class="camera-placeholder" id="camera-placeholder"><span>📷</span><p>Caméra non démarrée</p></div>
-        </div>
-        <div class="scan-actions">
-          <button class="btn-primary" id="btn-start-camera">🎥 Démarrer caméra</button>
-          <button class="btn-capture hidden" id="btn-capture">📸 Capturer</button>
-          <button class="btn-secondary" id="btn-upload-photo">🖼️ Importer photo</button>
-          <input type="file" id="file-input" accept="image/*" capture="environment" class="hidden"/>
-        </div>
-        <div id="ocr-status" class="ocr-status hidden"><div class="ocr-spinner"></div><span id="ocr-status-text">Analyse...</span></div>
-        <div id="image-preview-container" class="hidden"><img id="image-preview" alt=""/></div>
+    <!-- SYNTHÈSE MATÉRIELS -->
+    <div id="mtab-synthesis" class="tab-content">
+      <div class="list-toolbar">
+        <input type="text" id="eq-search" placeholder="🔍 Rechercher..."/>
+        <select id="eq-filter-cat"><option value="">Tous modules</option></select>
       </div>
+      <div id="mission-eq-list" class="card-list" style="padding-bottom:80px"></div>
     </div>
 
     <!-- RELEVÉS -->
@@ -246,6 +235,10 @@
     </div>
   </div>
 
+  <!-- USERS -->
+  <div id="view-users" class="view">
+  </div>
+
   <!-- SETTINGS -->
   <div id="view-settings" class="view">
     <div class="settings-container">
@@ -319,17 +312,15 @@
         <div class="form-group"><label>Nb logements</label><input type="number" id="site-logements"/></div>
         <div class="form-group"><label>Dont locaux pro</label><input type="number" id="site-locaux-pro"/></div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>Hauteur statique (m)</label><input type="number" id="site-hauteur" step="0.5"/></div>
-        <div class="form-group"><label>Nb logements/bât.</label><input type="number" id="site-logt-bat"/></div>
-      </div>
+      <div class="form-group"><label>Hauteur statique (m)</label><input type="number" id="site-hauteur" step="0.5"/></div>
       <div class="form-section-title" style="margin:8px 0 6px">INSTALLATION</div>
       <div class="form-group"><label>Emplacement chaufferie</label><input type="text" id="site-emplacement" placeholder="Ex: Sous-sol niveau -1"/></div>
       <div class="form-group"><label>Énergie principale</label>
         <select id="site-energie">
-          <option value="Gaz naturel">Gaz naturel</option>
+          <option value="GAZ">GAZ</option>
           <option value="Fioul">Fioul</option>
-          <option value="CPCU / Réseau chaleur">CPCU / Réseau chaleur</option>
+          <option value="CPCU">CPCU</option>
+          <option value="Réseau de chaleur">Réseau de chaleur</option>
           <option value="Pompe à chaleur">Pompe à chaleur</option>
           <option value="Électrique">Électrique</option>
           <option value="Autre">Autre</option>
@@ -420,7 +411,6 @@
 
 <div id="toast" class="toast hidden"></div>
 
-<script src="logo.js"></script>
 <script src="forms-data.js"></script>
 <script src="app.js"></script>
 </body>
