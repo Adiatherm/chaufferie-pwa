@@ -135,9 +135,17 @@ function renderFormsZone(){
 
   // Render module blocks in FIXED ORDER
   container.innerHTML='';
+  // Get type de production for current local
+  const lfd=getLocalFd();
+  const typeProduction=(lfd.data['chauffage']||{})[0]?.['type_prod'] || 
+    (lfd.data['generalites']||{})['type_chaufferie'] || '';
+  const isChauffageSeul=typeProduction==='Chauffage seul';
+
   // Always render in FORM_MODULES order
   FORM_MODULES.forEach(mod=>{
     if(!activeModules.includes(mod.id))return;
+    // Hide ECS module if chauffage seul
+    if(mod.id==='ecs'&&isChauffageSeul)return;
     const block=buildModuleBlock(mod);
     block.id=`form-block-${mod.id}`;
     container.appendChild(block);
@@ -169,6 +177,10 @@ function refreshModuleBlock(modId, active){
     return;
   }
 
+  // Check ECS visibility
+  const lfdR=getLocalFd();
+  const tpR=(lfdR.data['generalites']||{})['type_chaufferie']||'';
+  if(modId==='ecs'&&tpR==='Chauffage seul')return;
   // Add in correct position (FORM_MODULES order)
   const mod=FORM_MODULES.find(m=>m.id===modId);if(!mod)return;
   const block=buildModuleBlock(mod);
@@ -447,34 +459,71 @@ function updateComputedField(field,modId,iIdx){
 }
 
 // ── EQUIPMENT INLINE ──────────────────────────────────────────────
+const CL_EQ={bon:'✅ Bon état',correct:'🔵 Correct',degrade:'⚠️ Dégradé',hs:'❌ Hors service'};
+
+function getModuleEquipments(moduleId){
+  // Match by exact moduleContext OR by base moduleId if no index suffix
+  const baseId=moduleId.replace(/_\d+$/,'');
+  const hasIdx=/_\d+$/.test(moduleId);
+  return equipments.filter(e=>{
+    if(e.missionId!==currentMissionId)return false;
+    if(e.moduleContext===moduleId)return true;
+    if(!hasIdx&&e.moduleId===baseId&&!e.moduleContext)return true;
+    return false;
+  });
+}
+
 function buildEquipmentInline(moduleId){
   const block=document.createElement('div');block.className='equip-inline-block';block.dataset.moduleId=moduleId;
+
   const refreshList=()=>{
-    const listDiv=block.querySelector('.equip-inline-list');if(!listDiv)return;
-    const baseId=moduleId.replace(/_\d+$/,'');
-    const mEqs=equipments.filter(e=>e.missionId===currentMissionId&&(e.moduleContext===moduleId||e.moduleId===baseId&&!moduleId.match(/_\d+$/)));
+    const listDiv=block.querySelector('.equip-cards-list');if(!listDiv)return;
+    const mEqs=getModuleEquipments(moduleId);
     listDiv.innerHTML='';
+    if(!mEqs.length){
+      listDiv.innerHTML='<div style="color:var(--text-muted);font-size:12px;padding:8px 0;font-style:italic">Aucun matériel — utilisez les boutons ci-dessous</div>';
+      return;
+    }
     mEqs.forEach(eq=>{
-      const item=document.createElement('div');item.className='equip-inline-item';
-      item.innerHTML=`<div class="equip-inline-name">${esc(eq.name||'—')}</div><div class="equip-inline-meta">${[eq.brand,eq.model].filter(Boolean).join(' · ')}</div><div class="equip-inline-actions"><button class="card-btn" data-action="edit">✏️</button><button class="card-btn" data-action="del">🗑️</button></div>`;
-      item.querySelector('[data-action=edit]').addEventListener('click',()=>openEqModal(eq.id,moduleId));
-      item.querySelector('[data-action=del]').addEventListener('click',async()=>{
-        if(!confirm('Supprimer ?'))return;
-        await dbDel('equipments',eq.id);equipments=equipments.filter(e=>e.id!==eq.id);refreshList();
+      const cat=categories.find(c=>c.id===eq.category)||{name:eq.category||'Autre',color:'#6b7280'};
+      const card=document.createElement('div');
+      card.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;overflow:hidden;margin-bottom:6px';
+      card.innerHTML=`
+        <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${cat.color};border-radius:3px 0 0 3px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:6px">
+          <div style="flex:1">
+            <div style="font-family:var(--font-display);font-size:15px;font-weight:700;margin-bottom:2px">${esc(eq.name||'—')}</div>
+            ${eq.brand||eq.model?`<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${[eq.brand,eq.model,eq.year?'('+eq.year+')':''].filter(Boolean).join(' ')}</div>`:''}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+              ${eq.serial?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">SN: ${esc(eq.serial)}</span>`:''}
+              ${eq.power?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--accent2)">${esc(eq.power)}</span>`:''}
+              ${eq.condition?`<span style="font-family:var(--font-mono);font-size:10px">${CL_EQ[eq.condition]||eq.condition}</span>`:''}
+            </div>
+            ${eq.notes?`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;font-style:italic">${esc(eq.notes.slice(0,80))}${eq.notes.length>80?'…':''}</div>`:''}
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0;margin-left:8px">
+            <button class="card-btn" data-action="edit" title="Modifier">✏️</button>
+            <button class="card-btn" data-action="del" title="Supprimer">🗑️</button>
+          </div>
+        </div>`;
+      card.querySelector('[data-action=edit]').addEventListener('click',()=>openEqModal(eq.id,moduleId));
+      card.querySelector('[data-action=del]').addEventListener('click',async()=>{
+        if(!confirm('Supprimer cet équipement ?'))return;
+        await dbDel('equipments',eq.id);equipments=equipments.filter(e=>e.id!==eq.id);
+        refreshList();renderSynthesis();
       });
-      listDiv.appendChild(item);
+      listDiv.appendChild(card);
     });
   };
 
-  const listDiv=document.createElement('div');listDiv.className='equip-inline-list';
-  const btnRow=document.createElement('div');btnRow.style.cssText='display:flex;gap:8px;margin-top:4px';
-  const addBtn=document.createElement('button');addBtn.className='equip-add-btn';addBtn.textContent='+ Saisir manuellement';
+  const listDiv=document.createElement('div');listDiv.className='equip-cards-list';
+  const btnRow=document.createElement('div');btnRow.style.cssText='display:flex;gap:8px;margin-top:6px';
+  const addBtn=document.createElement('button');addBtn.className='equip-add-btn';addBtn.textContent='＋ Saisir manuellement';
   addBtn.addEventListener('click',()=>openEqModal(null,moduleId));
-  const scanBtn=document.createElement('button');scanBtn.className='equip-scan-btn';scanBtn.textContent='📷 Scanner';
+  const scanBtn=document.createElement('button');scanBtn.className='equip-scan-btn';scanBtn.textContent='📷 Scanner la plaque';
   scanBtn.addEventListener('click',()=>{editingEqContext=moduleId;openScanForModule(moduleId);});
   btnRow.appendChild(addBtn);btnRow.appendChild(scanBtn);
   block.appendChild(listDiv);block.appendChild(btnRow);
-  // Expose refresh
   block._refresh=refreshList;
   refreshList();
   return block;
@@ -523,7 +572,7 @@ function renderMesuresTemp(field,parent,modId,iIdx){
       const row=document.createElement('div');row.className='mesure-point';
       const isAutre=pt.type==='Autre';
       row.innerHTML=`<div class="mesure-point-header"><select class="mpt">${(field.pointOptions||[]).map(o=>`<option value="${esc(o)}"${pt.type===o?' selected':''}>${esc(o)}</option>`).join('')}</select><button class="mesure-del">✕</button></div>${isAutre?`<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px"><input type="text" class="mp-lib" value="${esc(pt.libelle||'')}" placeholder="Libellé" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%"/><input type="text" class="mp-uni" value="${esc(pt.unite||'°C')}" placeholder="Unité" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none;width:100%"/></div>`:''}<div class="mesure-row"><div class="mesure-cell"><label>Départ</label><input type="number" class="mp-dep" step="0.1" value="${pt.dep||''}" placeholder="—"/></div><div class="mesure-cell"><label>Retour</label><input type="number" class="mp-ret" step="0.1" value="${pt.ret||''}" placeholder="—"/></div><div class="mesure-cell"><label>ΔT</label><div class="mesure-delta" id="dt${modId}${pi}">—</div></div></div>`;
-      const updt=()=>{const d=parseFloat(row.querySelector('.mp-dep').value),r=parseFloat(row.querySelector('.mp-ret').value);const el=document.getElementById(`dt${modId}${pi}`);if(el)el.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' K':'—';};
+      const updt=()=>{const d=parseFloat(row.querySelector('.mp-dep').value),r=parseFloat(row.querySelector('.mp-ret').value);const el=document.getElementById(`dt${modId}${pi}`);if(el)el.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' °C':'—';};
       row.querySelectorAll('input').forEach(el=>el.addEventListener('input',updt));
       const save=async()=>{const pts=getPoints();if(!pts[pi])pts[pi]={};pts[pi].type=row.querySelector('.mpt').value;pts[pi].dep=row.querySelector('.mp-dep').value;pts[pi].ret=row.querySelector('.mp-ret').value;if(isAutre){pts[pi].libelle=row.querySelector('.mp-lib')?.value||'';pts[pi].unite=row.querySelector('.mp-uni')?.value||'°C';}await savePoints(pts);};
       row.querySelectorAll('input,select').forEach(el=>el.addEventListener('change',save));
@@ -577,7 +626,7 @@ function renderMesuresChauf(field,parent,modId,iIdx){
       const dtEl=()=>document.getElementById(`dmc${modId}${pi}${iIdx||''}`);
       const updt=()=>{
         const el=dtEl();if(!el)return;
-        if(isTR){const d=parseFloat(row.querySelector('.mc-d')?.value),r=parseFloat(row.querySelector('.mc-r')?.value);el.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' K':'—';}
+        if(isTR){const d=parseFloat(row.querySelector('.mc-d')?.value),r=parseFloat(row.querySelector('.mc-r')?.value);el.textContent=(!isNaN(d)&&!isNaN(r))?(d-r).toFixed(1)+' °C':'—';}
         else if(isPP){const a=parseFloat(row.querySelector('.mc-a')?.value),f=parseFloat(row.querySelector('.mc-f')?.value);el.textContent=(!isNaN(a)&&!isNaN(f))?(f-a).toFixed(2)+' bar':'—';}
       };
       row.querySelectorAll('input').forEach(el=>el.addEventListener('input',updt));
@@ -762,46 +811,73 @@ function renderCahierBlock(mod,wrapper){
   const body=document.createElement('div');body.className='form-block-body';if(collapsed)body.style.display='none';
   header.addEventListener('click',()=>{const c=body.style.display==='none';body.style.display=c?'':'none';header.querySelector('.collapse-btn').textContent=c?'−':'+';setCollapsed(mod.id,!c);});
 
-  const fd=getMFD();const lk=getLocalKey();const lfd=getLocalFd();
-  const years=lfd.cahierYears||{};
+  const lk=getLocalKey();
 
+  // Get energy from site for conditional obligations
+  const site=window.sites?.find(s=>s.id===window.currentSiteId)||null;
+  const energie=(site?.energie||'').toLowerCase();
+  const isCombustion=energie.includes('gaz')||energie.includes('fioul');
+
+  // Nb years control
   const nbRow=document.createElement('div');nbRow.className='form-group';
-  nbRow.innerHTML=`<label>Années à renseigner</label><input type="number" id="cahier-nb-${lk}" min="1" max="10" value="${Object.keys(years).length||1}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);width:100%;font-size:14px;outline:none"/>`;
-  const btn=document.createElement('button');btn.className='btn-secondary btn-sm';btn.textContent='↻ Actualiser';btn.style.marginBottom='10px';
-  btn.addEventListener('click',async()=>{
+  nbRow.innerHTML=`<label>Années à renseigner</label><input type="number" id="cahier-nb-${lk}" min="1" max="10" value="1" style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);width:100%;font-size:14px;outline:none"/>`;
+  const actBtn=document.createElement('button');actBtn.className='btn-secondary btn-sm';actBtn.textContent='↻ Actualiser';actBtn.style.marginBottom='10px';
+  actBtn.addEventListener('click',async()=>{
     const nb=parseInt(document.getElementById(`cahier-nb-${lk}`)?.value)||1;
-    const mainFd=getMFD();if(!mainFd.localData)mainFd.localData={};if(!mainFd.localData[lk])mainFd.localData[lk]={data:{},repeatData:{},comments:{},cahierYears:{}};
-    for(let i=0;i<nb;i++){const yr=String(new Date().getFullYear()-i);if(!mainFd.localData[lk].cahierYears[yr])mainFd.localData[lk].cahierYears[yr]={obligations:{}};}
+    const mainFd=getMFD();if(!mainFd.localData)mainFd.localData={};
+    if(!mainFd.localData[lk])mainFd.localData[lk]={data:{},repeatData:{},comments:{},cahierYears:{}};
+    for(let i=0;i<nb;i++){const yr=String(new Date().getFullYear()-i);if(!mainFd.localData[lk].cahierYears[yr])mainFd.localData[lk].cahierYears[yr]={obligations:{},customOps:[]};}
     await saveMFD(mainFd);
-    // Re-render years without full rebuild
-    const yearsDiv=block.querySelector('.cahier-years');if(yearsDiv){yearsDiv.innerHTML='';renderYears(yearsDiv);}
+    yearsDiv.innerHTML='';
+    renderYears(yearsDiv);
   });
-  body.appendChild(nbRow);body.appendChild(btn);
+  body.appendChild(nbRow);body.appendChild(actBtn);
 
-  const puiss=(lfd.data['generalites']||{})['puissance_chaudiere']||'';
-  const oblDefs=OBLIGATIONS_CHAUFFERIE[puiss]||OBLIGATIONS_CHAUFFERIE['≥ 70 kW et < 400 kW'];
+  // Get puissance from primaire module
+  const lfd=getLocalFd();
+  const puiss=(lfd.data['primaire']||{})['prim_puissance']||'';
+  // Filter obligations based on energy
+  const allOblDefs=OBLIGATIONS_CHAUFFERIE[puiss]||OBLIGATIONS_CHAUFFERIE['≥ 70 kW et < 400 kW'];
+  const oblDefs=allOblDefs.filter(o=>{
+    if((o.id==='ramonage'||o.id==='combustion')&&!isCombustion)return false;
+    return true;
+  });
 
   const yearsDiv=document.createElement('div');yearsDiv.className='cahier-years';
+
   const renderYears=(container)=>{
+    container.innerHTML=''; // clear before re-render
     const lfd2=getLocalFd();const yrs=lfd2.cahierYears||{};
+    // Update nb input
+    const nbEl=document.getElementById(`cahier-nb-${lk}`);
+    if(nbEl)nbEl.value=Object.keys(yrs).length||1;
+
     Object.keys(yrs).sort().reverse().forEach(yr=>{
       const yData=yrs[yr];
       const yBlock=document.createElement('div');yBlock.className='year-block';
       const yhdr=document.createElement('div');yhdr.className='year-block-header';
-      yhdr.innerHTML=`<span class="year-block-title">📅 Année ${yr}</span><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">▾</span>`;
+      yhdr.innerHTML=`<span class="year-block-title">📅 Année ${yr}</span><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0">▾</button>`;
       const yBody=document.createElement('div');yBody.className='year-block-body';
-      let yCollapsed=false;yhdr.addEventListener('click',()=>{yCollapsed=!yCollapsed;yBody.className='year-block-body'+(yCollapsed?' collapsed':'');});
-      // Saison
+      let yCollapsed=false;
+      yhdr.addEventListener('click',()=>{yCollapsed=!yCollapsed;yBody.className='year-block-body'+(yCollapsed?' collapsed':'');yhdr.querySelector('button').textContent=yCollapsed?'▸':'▾';});
+
+      // Saison dates
       [{id:'date_allumage',label:"Date allumage"},{id:'date_arret',label:"Date arrêt"}].forEach(sf=>{
         const fg=document.createElement('div');fg.className='form-group';
         fg.innerHTML=`<label>${sf.label}</label><input type="date" value="${yData[sf.id]||''}"/>`;
         fg.querySelector('input').addEventListener('change',async e=>{
-          const mainFd=getMFD();if(!mainFd.localData?.[lk]?.cahierYears?.[yr])return;
-          mainFd.localData[lk].cahierYears[yr][sf.id]=e.target.value;await saveMFD(mainFd);
+          const mf=getMFD();if(!mf.localData?.[lk]?.cahierYears?.[yr])return;
+          mf.localData[lk].cahierYears[yr][sf.id]=e.target.value;await saveMFD(mf);
         });
         yBody.appendChild(fg);
       });
-      const oblTitle=document.createElement('div');oblTitle.className='form-section-title';oblTitle.textContent='OPÉRATIONS';yBody.appendChild(oblTitle);
+
+      // Predefined obligations
+      const oblTitle=document.createElement('div');oblTitle.className='form-section-title';oblTitle.textContent='OPÉRATIONS RÉGLEMENTAIRES';yBody.appendChild(oblTitle);
+      if(!isCombustion){
+        const warn=document.createElement('div');warn.style.cssText='font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-bottom:8px';
+        warn.textContent='ℹ️ Ramonage & combustion masqués (énergie non combustible)';yBody.appendChild(warn);
+      }
       if(!yData.obligations)yData.obligations={};
       oblDefs.forEach(obl=>{
         if(!yData.obligations[obl.id])yData.obligations[obl.id]={freq:obl.freq_default,dates:[]};
@@ -809,24 +885,72 @@ function renderCahierBlock(mod,wrapper){
         const oblRow=document.createElement('div');oblRow.className='obligation-row';
         oblRow.innerHTML=`<div class="obligation-header"><span class="obligation-label">${obl.label}</span><select class="obl-freq" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--accent);font-family:var(--font-mono);font-size:11px;outline:none">${FREQ_OPTIONS.map(f=>`<option value="${f}"${f===oblData.freq?' selected':''}>${f}</option>`).join('')}</select></div>`;
         const datesDiv=document.createElement('div');datesDiv.className='obligation-dates';
-        (oblData.dates||[]).forEach((dv,di)=>{
-          const dr=document.createElement('div');dr.className='obl-date-row';
-          dr.innerHTML=`<span class="obl-date-label">${di+1}.</span><input type="date" value="${dv||''}" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:12px;outline:none"/><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 4px;font-size:12px">✕</button>`;
-          dr.querySelector('input').addEventListener('change',async e=>{const mainFd=getMFD();if(mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id]?.dates)mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates[di]=e.target.value;await saveMFD(mainFd);});
-          dr.querySelector('button').addEventListener('click',async()=>{const mainFd=getMFD();if(mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id]?.dates)mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates.splice(di,1);await saveMFD(mainFd);renderYears(container);});
-          datesDiv.appendChild(dr);
-        });
-        const addDateBtn=document.createElement('button');addDateBtn.className='btn-add-comment';addDateBtn.textContent='+ Ajouter une date';
-        addDateBtn.addEventListener('click',async()=>{const mainFd=getMFD();if(!mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id])return;if(!mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates)mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates=[];mainFd.localData[lk].cahierYears[yr].obligations[obl.id].dates.push('');await saveMFD(mainFd);renderYears(container);});
-        oblRow.querySelector('.obl-freq').addEventListener('change',async e=>{const mainFd=getMFD();if(mainFd.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id])mainFd.localData[lk].cahierYears[yr].obligations[obl.id].freq=e.target.value;await saveMFD(mainFd);});
-        oblRow.appendChild(datesDiv);oblRow.appendChild(addDateBtn);yBody.appendChild(oblRow);
+        const renderDates=(dates)=>{
+          datesDiv.innerHTML='';
+          dates.forEach((dv,di)=>{
+            const dr=document.createElement('div');dr.className='obl-date-row';
+            dr.innerHTML=`<span class="obl-date-label">${di+1}.</span><input type="date" value="${dv||''}" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:12px;outline:none"/><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 5px;font-size:12px">✕</button>`;
+            dr.querySelector('input').addEventListener('change',async e=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id]?.dates)mf.localData[lk].cahierYears[yr].obligations[obl.id].dates[di]=e.target.value;await saveMFD(mf);});
+            dr.querySelector('button').addEventListener('click',async()=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id]?.dates){mf.localData[lk].cahierYears[yr].obligations[obl.id].dates.splice(di,1);await saveMFD(mf);renderDates(mf.localData[lk].cahierYears[yr].obligations[obl.id].dates);}});
+            datesDiv.appendChild(dr);
+          });
+          const addBtn=document.createElement('button');addBtn.className='btn-add-comment';addBtn.textContent='+ Ajouter une date';
+          addBtn.addEventListener('click',async()=>{const mf=getMFD();if(!mf.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id])return;if(!mf.localData[lk].cahierYears[yr].obligations[obl.id].dates)mf.localData[lk].cahierYears[yr].obligations[obl.id].dates=[];mf.localData[lk].cahierYears[yr].obligations[obl.id].dates.push('');await saveMFD(mf);renderDates(mf.localData[lk].cahierYears[yr].obligations[obl.id].dates);});
+          datesDiv.appendChild(addBtn);
+        };
+        renderDates(oblData.dates||[]);
+        oblRow.querySelector('.obl-freq').addEventListener('change',async e=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.obligations?.[obl.id])mf.localData[lk].cahierYears[yr].obligations[obl.id].freq=e.target.value;await saveMFD(mf);});
+        oblRow.appendChild(datesDiv);yBody.appendChild(oblRow);
       });
+
+      // Custom operations
+      const customTitle=document.createElement('div');customTitle.className='form-section-title';customTitle.textContent='OPÉRATIONS PERSONNALISÉES';yBody.appendChild(customTitle);
+      const customList=document.createElement('div');
+      const renderCustomOps=(ops)=>{
+        customList.innerHTML='';
+        (ops||[]).forEach((op,oi)=>{
+          const opRow=document.createElement('div');opRow.className='obligation-row';
+          const IS='background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:6px 8px;color:var(--text-primary);font-size:12px;outline:none';
+          opRow.innerHTML=`<div class="obligation-header" style="flex-wrap:wrap;gap:4px"><input type="text" class="op-label" value="${esc(op.label||'')}" placeholder="Libellé de l'opération" style="${IS};flex:1;min-width:120px"/><select class="op-freq" style="${IS};color:var(--accent);font-family:var(--font-mono);font-size:11px">${FREQ_OPTIONS.map(f=>`<option value="${f}"${f===op.freq?' selected':''}>${f}</option>`).join('')}</select><button class="op-del" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;padding:0 4px">✕</button></div>`;
+          const datesDiv2=document.createElement('div');datesDiv2.className='obligation-dates';
+          const renderOpDates=(dates)=>{
+            datesDiv2.innerHTML='';
+            (dates||[]).forEach((dv,di)=>{
+              const dr=document.createElement('div');dr.className='obl-date-row';
+              dr.innerHTML=`<span class="obl-date-label">${di+1}.</span><input type="date" value="${dv||''}" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text-primary);font-size:12px;outline:none"/><button style="background:none;border:none;color:var(--text-muted);cursor:pointer;padding:2px 5px;font-size:12px">✕</button>`;
+              dr.querySelector('input').addEventListener('change',async e=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.customOps?.[oi])mf.localData[lk].cahierYears[yr].customOps[oi].dates[di]=e.target.value;await saveMFD(mf);});
+              dr.querySelector('button').addEventListener('click',async()=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.customOps?.[oi]?.dates){mf.localData[lk].cahierYears[yr].customOps[oi].dates.splice(di,1);await saveMFD(mf);renderOpDates(mf.localData[lk].cahierYears[yr].customOps[oi].dates);}});
+              datesDiv2.appendChild(dr);
+            });
+            const addDateBtn=document.createElement('button');addDateBtn.className='btn-add-comment';addDateBtn.textContent='+ Ajouter une date';
+            addDateBtn.addEventListener('click',async()=>{const mf=getMFD();if(!mf.localData?.[lk]?.cahierYears?.[yr]?.customOps?.[oi])return;if(!mf.localData[lk].cahierYears[yr].customOps[oi].dates)mf.localData[lk].cahierYears[yr].customOps[oi].dates=[];mf.localData[lk].cahierYears[yr].customOps[oi].dates.push('');await saveMFD(mf);renderOpDates(mf.localData[lk].cahierYears[yr].customOps[oi].dates);});
+            datesDiv2.appendChild(addDateBtn);
+          };
+          renderOpDates(op.dates||[]);
+          opRow.querySelector('.op-label').addEventListener('change',async e=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.customOps?.[oi])mf.localData[lk].cahierYears[yr].customOps[oi].label=e.target.value;await saveMFD(mf);});
+          opRow.querySelector('.op-freq').addEventListener('change',async e=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.customOps?.[oi])mf.localData[lk].cahierYears[yr].customOps[oi].freq=e.target.value;await saveMFD(mf);});
+          opRow.querySelector('.op-del').addEventListener('click',async()=>{const mf=getMFD();if(mf.localData?.[lk]?.cahierYears?.[yr]?.customOps)mf.localData[lk].cahierYears[yr].customOps.splice(oi,1);await saveMFD(mf);renderCustomOps(mf.localData?.[lk]?.cahierYears?.[yr]?.customOps||[]);});
+          opRow.appendChild(datesDiv2);customList.appendChild(opRow);
+        });
+        const addOpBtn=document.createElement('button');addOpBtn.className='btn-add-instance';addOpBtn.textContent='+ Ajouter une opération';addOpBtn.style.marginTop='4px';
+        addOpBtn.addEventListener('click',async()=>{
+          const mf=getMFD();if(!mf.localData?.[lk]?.cahierYears?.[yr])return;
+          if(!mf.localData[lk].cahierYears[yr].customOps)mf.localData[lk].cahierYears[yr].customOps=[];
+          mf.localData[lk].cahierYears[yr].customOps.push({label:'',freq:'Annuel',dates:[]});
+          await saveMFD(mf);renderCustomOps(mf.localData[lk].cahierYears[yr].customOps);
+        });
+        customList.appendChild(addOpBtn);
+      };
+      renderCustomOps(yData.customOps||[]);
+      yBody.appendChild(customList);
       yBlock.appendChild(yhdr);yBlock.appendChild(yBody);container.appendChild(yBlock);
     });
   };
+
   renderYears(yearsDiv);body.appendChild(yearsDiv);
   block.appendChild(header);block.appendChild(body);wrapper.appendChild(block);
 }
+
 
 // ── LOCAUX SETUP ──────────────────────────────────────────────────
 function renderLocauxSetup(locaux,fd){

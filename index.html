@@ -168,75 +168,71 @@
       </div>
     </div>
 
-    <!-- INCIDENT -->
+    <!-- INCIDENT — single page, all inline -->
     <div id="mtab-incident" class="tab-content">
-      <div class="incident-zone">
-        <h2>🚨 Rapport d'incident</h2>
-        <p>Rapport ciblé — tient sur une page</p>
-        <div class="settings-card">
-          <h3>Objet de l'incident</h3>
-          <textarea id="incident-objet" placeholder="Description de l'incident / constat..." rows="3"></textarea>
-        </div>
-        <div class="settings-card">
-          <h3>Champs libres paramétrables</h3>
-          <div id="incident-fields-list"></div>
-          <div style="display:flex;gap:8px;margin-top:6px">
-            <input type="text" id="incident-new-field" placeholder="Libellé du champ..." style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);font-size:13px;outline:none"/>
-            <button class="btn-primary btn-sm" id="btn-add-incident-field" style="width:auto;padding:8px 14px">＋</button>
-          </div>
-        </div>
-        <div class="settings-card">
-          <h3>Conclusion</h3>
-          <select id="incident-conclusion">
-            <option value="">Sélectionner...</option>
-            <option value="urgent">⚠️ Intervention urgente requise</option>
-            <option value="surveiller">👁️ À surveiller</option>
-            <option value="traite">✅ Traité sur place</option>
-            <option value="info">ℹ️ Informatif</option>
-          </select>
-        </div>
-        <button class="btn-primary" id="btn-export-incident-pdf" style="background:var(--danger)">🚨 Exporter rapport d'incident PDF</button>
+      <div class="incident-zone" id="incident-full-zone">
+        <!-- Loaded dynamically by loadIncidentData() -->
       </div>
     </div>
 
     <!-- RAPPORT -->
     <div id="mtab-report" class="tab-content">
       <div class="report-zone">
-        <div class="report-header-block"><h2>Rapport de visite</h2><p>Exports disponibles pour cette mission</p></div>
-        <div class="settings-card">
-          <h3>📝 Observations générales</h3>
-          <textarea id="report-obs" placeholder="Observations sur l'installation..." rows="4"></textarea>
+        <div class="report-header-block">
+          <h2>📄 Rapport de visite</h2>
+          <p>Configurez et exportez le rapport complet</p>
         </div>
+
+        <!-- Page de garde -->
+        <div class="settings-card">
+          <h3>🏢 Page de garde</h3>
+          <div class="form-group">
+            <label>Photo de l'immeuble</label>
+            <div id="cover-photo-preview" style="width:100%;aspect-ratio:16/9;background:var(--bg-elevated);border:1px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:8px;cursor:pointer" id="cover-photo-zone">
+              <img id="cover-photo-img" style="display:none;width:100%;height:100%;object-fit:cover"/>
+              <div id="cover-photo-placeholder" style="text-align:center;color:var(--text-muted)"><div style="font-size:32px;margin-bottom:6px">🏢</div><div style="font-size:12px">Appuyer pour ajouter une photo</div></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn-secondary btn-sm" id="btn-cover-camera" style="width:auto">📷 Caméra</button>
+              <button class="btn-secondary btn-sm" id="btn-cover-gallery" style="width:auto">🖼️ Galerie</button>
+              <button class="btn-secondary btn-sm" id="btn-cover-remove" style="width:auto;display:none;color:var(--danger)">✕ Retirer</button>
+            </div>
+            <input type="file" id="cover-photo-input" accept="image/*" style="display:none"/>
+          </div>
+        </div>
+
+        <!-- Conclusion libre -->
         <div class="settings-card">
           <h3>✅ Conclusion</h3>
-          <select id="report-conclusion">
-            <option value="">Sélectionner...</option>
-            <option value="conforme">Installation conforme</option>
-            <option value="reserves">Conforme avec réserves</option>
-            <option value="non_conforme">Non conforme</option>
-            <option value="a_completer">À compléter</option>
-          </select>
+          <textarea id="report-conclusion-text" placeholder="Rédigez librement votre conclusion..." rows="6" style="width:100%;resize:vertical;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text-primary);font-size:13px;outline:none;font-family:var(--font-body)"></textarea>
         </div>
+
+        <!-- Options d'export -->
         <div class="settings-card">
-          <h3>📦 Contenu du rapport PDF</h3>
-          <label class="check-row"><input type="checkbox" id="rpt-equipments" checked/> Liste des équipements</label>
-          <label class="check-row"><input type="checkbox" id="rpt-forms" checked/> Formulaires de relevés</label>
-          <label class="check-row"><input type="checkbox" id="rpt-notes" checked/> Notes de visite</label>
-          <label class="check-row"><input type="checkbox" id="rpt-photos" checked/> Reportage photographique</label>
+          <h3>⚙️ Options d'export</h3>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="rpt-releves" checked style="width:16px;height:16px;accent-color:var(--accent)"/><span style="font-size:13px">Relevés et commentaires</span></label>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="rpt-notes" checked style="width:16px;height:16px;accent-color:var(--accent)"/><span style="font-size:13px">Notes de visite</span></label>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="rpt-photos" checked style="width:16px;height:16px;accent-color:var(--accent)"/><span style="font-size:13px">Rapport photographique</span></label>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer"><input type="checkbox" id="rpt-materiels" checked style="width:16px;height:16px;accent-color:var(--accent)"/><span style="font-size:13px">Annexe — Synthèse matériels</span></label>
+          </div>
         </div>
-        <div class="report-actions">
-          <button class="btn-primary" id="btn-export-pdf">📄 Exporter PDF</button>
-          <button class="btn-primary" id="btn-export-excel" style="background:var(--success)">📊 Exporter Excel</button>
-          <button class="btn-secondary" id="btn-export-word">📝 Exporter Word (photos)</button>
-          <button class="btn-secondary" id="btn-export-csv">📋 Exporter CSV équipements</button>
+
+        <!-- Boutons d'export -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <button class="btn-primary" id="btn-export-word" style="font-size:15px;padding:14px">
+            📝 Exporter rapport complet (Word)
+          </button>
+          <button class="btn-secondary" id="btn-export-excel">
+            📊 Exporter données (Excel)
+          </button>
+          <button class="btn-secondary" id="btn-export-csv">
+            📋 Exporter matériels (CSV)
+          </button>
         </div>
-        <div class="tip-box">L'export Excel génère un classeur avec un onglet par module de relevé + équipements + photos + notes.</div>
+
       </div>
     </div>
-  </div>
-
-  <!-- USERS -->
-  <div id="view-users" class="view">
   </div>
 
   <!-- SETTINGS -->
@@ -354,7 +350,13 @@
         <div class="form-group"><label>Date début</label><input type="date" id="mission-date-start"/></div>
         <div class="form-group"><label>Date fin</label><input type="date" id="mission-date-end"/></div>
       </div>
-      <div class="form-group"><label>Intervenant</label><input type="text" id="mission-operator"/></div>
+      <div class="form-group">
+        <label>Intervenant</label>
+        <select id="mission-operator-select" style="margin-bottom:6px">
+          <option value="">— Sélectionner depuis la liste —</option>
+        </select>
+        <input type="text" id="mission-operator" placeholder="Ou saisir manuellement"/>
+      </div>
       <div class="form-group"><label>Statut</label>
         <select id="mission-status"><option value="planifie">Planifiée</option><option value="en_cours">En cours</option><option value="termine">Terminée</option></select>
       </div>

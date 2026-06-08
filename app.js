@@ -11,7 +11,7 @@ function openDB(){
     const r=indexedDB.open(DB_NAME,DB_VER);
     r.onupgradeneeded=e=>{
       const d=e.target.result;
-      ['sites','missions','equipments','formdata','notes','photoreport','incidentdata','config','users'].forEach(s=>{
+      ['sites','missions','equipments','formdata','notes','photoreport','incidentdata','config','users','equiplib'].forEach(s=>{
         if(!d.objectStoreNames.contains(s))d.createObjectStore(s,{keyPath:'id'});
       });
     };
@@ -104,6 +104,7 @@ function switchMTab(name){
   if(name==='incident')loadIncidentData();
   if(name==='participants')renderParticipants();
   if(name==='synthesis')renderSynthesis();
+  if(name==='report')initReportTab();
   if(name!=='scan'&&name!=='forms')stopCamera();
 }
 
@@ -174,19 +175,53 @@ function setupEvents(){
 
 // ── USERS ─────────────────────────────────────────────────────────
 function renderUsersView(){
-  const vEl=document.getElementById('view-settings');
-  // Render users in settings panel top section — or in a dedicated view
-  // We'll use the settings view's container but show users first
   const container=document.getElementById('view-users');
   if(!container)return;
-  container.innerHTML=`<div class="users-panel"><h2 style="font-family:var(--font-display);font-size:18px;font-weight:700;padding:0 0 12px">Qui êtes-vous ?</h2>${users.length===0?'<p style="color:var(--text-secondary);font-size:13px">Aucun utilisateur — créez-en un dans Paramètres.</p>':''}${users.map(u=>`<div class="user-card${currentUser?.id===u.id?' active-user':''}" data-uid="${u.id}"><div class="user-avatar">${(u.prenom||u.nom||'?')[0].toUpperCase()}</div><div class="user-info"><div class="user-name">${esc(u.prenom+' '+u.nom)}</div><div class="user-email">${esc(u.email||'')}</div></div>${currentUser?.id===u.id?'<span style="color:var(--accent);font-size:18px">✓</span>':''}</div>`).join('')}</div>`;
-  container.querySelectorAll('[data-uid]').forEach(card=>{
-    card.addEventListener('click',async()=>{
-      const u=users.find(x=>x.id===card.dataset.uid);
-      currentUser=u;await dbPut('config',{key:'currentUser',value:u});
-      showView('dashboard');showToast(`Connecté en tant que ${u.prenom} ${u.nom}`,'success');
+  container.innerHTML='';
+  const panel=document.createElement('div');panel.className='users-panel';
+  const title=document.createElement('h2');
+  title.style.cssText='font-family:var(--font-display);font-size:20px;font-weight:700;padding:0 0 16px;text-align:center';
+  title.textContent='Qui êtes-vous ?';
+  panel.appendChild(title);
+  if(!users.length){
+    const msg=document.createElement('p');msg.style.cssText='color:var(--text-secondary);font-size:13px;text-align:center';
+    msg.textContent='Aucun utilisateur — créez-en un dans Paramètres.';panel.appendChild(msg);
+    const btn=document.createElement('button');btn.className='btn-secondary';btn.style.marginTop='12px';
+    btn.textContent='⚙️ Aller aux paramètres';btn.addEventListener('click',()=>showView('settings'));
+    panel.appendChild(btn);
+  }else{
+    users.forEach(u=>{
+      const card=document.createElement('div');card.className='user-card';
+      card.style.cssText='display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s;margin-bottom:8px';
+      if(currentUser?.id===u.id){card.style.borderColor='var(--accent)';card.style.background='rgba(30,127,212,.1)';}
+      const avatar=document.createElement('div');avatar.className='user-avatar';avatar.style.cssText='width:44px;height:44px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:18px;font-weight:700;color:white;flex-shrink:0';
+      avatar.textContent=((u.prenom||u.nom||'?')[0]).toUpperCase();
+      const info=document.createElement('div');info.style.flex='1';
+      info.innerHTML=`<div style="font-family:var(--font-display);font-size:16px;font-weight:600">${esc(u.prenom||'')} ${esc(u.nom||'')}</div><div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(u.email||'')}</div>`;
+      const btn=document.createElement('button');
+      if(currentUser?.id===u.id){
+        btn.style.cssText='background:none;border:none;color:var(--accent);font-size:22px;cursor:default';btn.textContent='✓';
+      }else{
+        btn.className='btn-primary btn-sm';btn.style.cssText='width:auto;padding:8px 16px;flex-shrink:0';btn.textContent='Choisir';
+        btn.addEventListener('click',async(e)=>{
+          e.stopPropagation();
+          currentUser=u;
+          await dbPut('config',{key:'currentUser',value:u});
+          showView('dashboard');
+          showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
+        });
+      }
+      card.appendChild(avatar);card.appendChild(info);card.appendChild(btn);
+      // Also allow clicking the whole card
+      card.addEventListener('click',async()=>{
+        if(currentUser?.id===u.id)return;
+        currentUser=u;await dbPut('config',{key:'currentUser',value:u});
+        showView('dashboard');showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
+      });
+      panel.appendChild(card);
     });
-  });
+  }
+  container.appendChild(panel);
 }
 
 // ── DASHBOARD ────────────────────────────────────────────────────
@@ -243,9 +278,16 @@ function renderSiteView(){
 function renderMissionView(){
   const m=missions.find(x=>x.id===currentMissionId);
   const isIncident=m?.type==='incident';
-  const incidentBtn=document.getElementById('tab-incident-btn');
-  if(incidentBtn)incidentBtn.style.display=isIncident?'':'none';
-  switchMTab('participants');
+  // Show/hide tabs based on mission type
+  const allTabs=['participants','forms','synthesis','notes','photos','report'];
+  const incidentOnlyTabs=['incident'];
+  const normalOnlyTabs=['participants','forms','synthesis','notes','photos','report'];
+  document.querySelectorAll('[data-mtab]').forEach(btn=>{
+    const t=btn.dataset.mtab;
+    if(t==='incident'){btn.style.display=isIncident?'':'none';return;}
+    if(isIncident){btn.style.display='none';}else{btn.style.display='';}
+  });
+  switchMTab(isIncident?'incident':'participants');
 }
 
 // ── PARTICIPANTS ──────────────────────────────────────────────────
@@ -1256,7 +1298,21 @@ function openMissionModal(id=null){
   document.getElementById('mission-type').value=m?.type||'audit';
   document.getElementById('mission-date-start').value=m?.dateStart||today();
   document.getElementById('mission-date-end').value=m?.dateEnd||'';
-  document.getElementById('mission-operator').value=m?.operator||(currentUser?`${currentUser.prenom} ${currentUser.nom}`:'');
+  // Pre-fill operator with current user
+  const opEl=document.getElementById('mission-operator');
+  if(opEl)opEl.value=m?.operator||(currentUser?`${currentUser.prenom} ${currentUser.nom}`:'');
+  // Populate user select if present
+  const opSel=document.getElementById('mission-operator-select');
+  if(opSel){
+    opSel.innerHTML='<option value="">— Sélectionner un intervenant —</option>';
+    users.forEach(u=>{
+      const o=document.createElement('option');o.value=`${u.prenom} ${u.nom}`.trim();
+      o.textContent=`${u.prenom} ${u.nom}`;
+      if(opEl?.value===`${u.prenom} ${u.nom}`.trim())o.selected=true;
+      opSel.appendChild(o);
+    });
+    opSel.addEventListener('change',()=>{if(opEl&&opSel.value)opEl.value=opSel.value;});
+  }
   document.getElementById('mission-status').value=m?.status||'en_cours';
   document.getElementById('mission-ref').value=m?.ref||'';
   document.getElementById('mission-notes').value=m?.notes||'';
@@ -1320,6 +1376,11 @@ async function saveEquipment(){
   const baseModId=rawModId?rawModId.replace(/_\d+$/,''):null;
   const eq={id:editingEqId||uid(),missionId:currentMissionId,moduleId:baseModId,moduleContext:rawModId,category:v('field-category'),name,brand:v('field-brand'),model:v('field-model'),serial:v('field-serial'),year:vn('field-year'),power:v('field-power'),fluid:v('field-fluid'),location:v('field-location'),condition:v('field-condition'),notes:v('field-notes'),ocrRaw:v('field-ocr-raw'),photo:attachedPhoto||null,updatedAt:now(),createdAt:editingEqId?(equipments.find(e=>e.id===editingEqId)?.createdAt||now()):now()};
   await dbPut('equipments',eq);if(editingEqId){const i=equipments.findIndex(e=>e.id===editingEqId);if(i>=0)equipments[i]=eq;else equipments.push(eq);}else equipments.push(eq);
+  // Save to equipment library for future reuse
+  if(eq.name&&eq.brand){
+    const libEntry={id:`lib_${eq.brand}_${eq.model||eq.name}`.replace(/\s+/g,'_').toLowerCase(),name:eq.name,brand:eq.brand,model:eq.model||'',power:eq.power||'',category:eq.category};
+    await dbPut('equiplib',libEntry);
+  }
   capturedImage=null;document.getElementById('modal-equipment').classList.add('hidden');
   refreshAllEquipInline();showToast(editingEqId?'Équipement mis à jour ✓':'Équipement ajouté ✓','success');
 }
@@ -1330,6 +1391,115 @@ document.getElementById('attach-file-input')?.addEventListener('change',e=>{
   const f=e.target.files[0];if(!f)return;
   const reader=new FileReader();reader.onload=ev=>{attachedPhoto=ev.target.result;const img=document.getElementById('field-photo-preview');img.src=attachedPhoto;img.classList.remove('hidden');};reader.readAsDataURL(f);e.target.value='';
 });
+
+
+// ── SCAN MODULE ───────────────────────────────────────────────────
+let scanModalStream=null;
+
+function openScanForModule(moduleId){
+  editingEqContext=moduleId;
+  let scanModal=document.getElementById('scan-modal');
+  if(!scanModal){
+    scanModal=document.createElement('div');scanModal.id='scan-modal';
+    scanModal.style.cssText='position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:env(safe-area-inset-bottom)';
+    scanModal.innerHTML=`
+      <div style="width:100%;max-width:600px;background:var(--bg-dark);border-radius:16px 16px 0 0;padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-family:var(--font-display);font-size:16px;font-weight:700">📷 Scanner une plaque</span>
+          <button id="scan-modal-close" style="background:var(--bg-card);border:1px solid var(--border);border-radius:50%;width:30px;height:30px;color:var(--text-secondary);cursor:pointer;font-size:13px">✕</button>
+        </div>
+        <div style="position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:var(--radius);overflow:hidden">
+          <video id="scan-modal-video" autoplay playsinline style="width:100%;height:100%;object-fit:cover"></video>
+          <canvas id="scan-modal-canvas" style="display:none"></canvas>
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+            <div style="width:65%;aspect-ratio:2/1;position:relative">
+              <div style="position:absolute;top:0;left:0;width:16px;height:16px;border-top:3px solid var(--accent);border-left:3px solid var(--accent)"></div>
+              <div style="position:absolute;top:0;right:0;width:16px;height:16px;border-top:3px solid var(--accent);border-right:3px solid var(--accent)"></div>
+              <div style="position:absolute;bottom:0;left:0;width:16px;height:16px;border-bottom:3px solid var(--accent);border-left:3px solid var(--accent)"></div>
+              <div style="position:absolute;bottom:0;right:0;width:16px;height:16px;border-bottom:3px solid var(--accent);border-right:3px solid var(--accent)"></div>
+            </div>
+          </div>
+          <div id="scan-modal-placeholder" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:var(--bg-card)">
+            <span style="font-size:36px;opacity:.3">📷</span>
+            <p style="color:var(--text-muted);font-size:13px">Caméra non démarrée</p>
+          </div>
+        </div>
+        <div id="scan-ocr-status" class="ocr-status hidden"><div class="ocr-spinner"></div><span id="scan-ocr-text">Analyse...</span></div>
+        <button class="btn-primary" id="scan-modal-start">🎥 Démarrer caméra</button>
+        <button class="btn-capture hidden" id="scan-modal-capture">📸 Capturer</button>
+        <button class="btn-secondary" id="scan-modal-gallery">🖼️ Depuis la galerie</button>
+        <input type="file" id="scan-modal-file" accept="image/*" capture="environment" style="display:none"/>
+      </div>`;
+    document.body.appendChild(scanModal);
+  }
+  // Reset state
+  const placeholder=document.getElementById('scan-modal-placeholder');
+  if(placeholder)placeholder.style.display='flex';
+  document.getElementById('scan-modal-start')?.classList.remove('hidden');
+  document.getElementById('scan-modal-capture')?.classList.add('hidden');
+
+  scanModal.style.display='flex';
+  document.getElementById('scan-modal-close').onclick=()=>stopScanModal();
+  document.getElementById('scan-modal-start').onclick=()=>startScanModal();
+  document.getElementById('scan-modal-capture').onclick=()=>captureScanModal();
+  document.getElementById('scan-modal-gallery').onclick=()=>document.getElementById('scan-modal-file').click();
+  document.getElementById('scan-modal-file').onchange=e=>{if(e.target.files[0])processImageFileScan(e.target.files[0]);e.target.value='';};
+}
+
+async function startScanModal(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+    scanModalStream=stream;
+    const video=document.getElementById('scan-modal-video');video.srcObject=stream;
+    document.getElementById('scan-modal-placeholder').style.display='none';
+    document.getElementById('scan-modal-start').classList.add('hidden');
+    document.getElementById('scan-modal-capture').classList.remove('hidden');
+  }catch(e){showToast('Accès caméra refusé — utilisez Galerie','error');}
+}
+
+function stopScanModal(){
+  if(scanModalStream){scanModalStream.getTracks().forEach(t=>t.stop());scanModalStream=null;}
+  const v=document.getElementById('scan-modal-video');if(v)v.srcObject=null;
+  const modal=document.getElementById('scan-modal');if(modal)modal.style.display='none';
+  document.getElementById('scan-modal-start')?.classList.remove('hidden');
+  document.getElementById('scan-modal-capture')?.classList.add('hidden');
+}
+
+async function captureScanModal(){
+  const video=document.getElementById('scan-modal-video');
+  const canvas=document.getElementById('scan-modal-canvas');
+  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+  canvas.getContext('2d').drawImage(video,0,0);
+  const dataURL=canvas.toDataURL('image/jpeg',0.9);
+  stopScanModal();
+  await analyzeImageForModule(dataURL);
+}
+
+async function processImageFileScan(file){
+  const reader=new FileReader();
+  reader.onload=async e=>{stopScanModal();await analyzeImageForModule(e.target.result);};
+  reader.readAsDataURL(file);
+}
+
+async function analyzeImageForModule(dataURL){
+  const se=document.getElementById('scan-ocr-status');
+  const st=document.getElementById('scan-ocr-text');
+  if(se)se.classList.remove('hidden');
+  let result=null;
+  if(navigator.onLine&&geminiKey){
+    try{if(st)st.textContent='🌐 Gemini Vision...';result=await analyzeWithGemini(dataURL);}
+    catch(e){console.warn('Gemini failed:',e);}
+  }
+  if(!result){
+    if(st)st.textContent='🔍 OCR hors-ligne...';
+    try{result=await analyzeWithTesseract(dataURL,st||{textContent:''});}
+    catch(e){console.error('Tesseract failed:',e);}
+  }
+  if(se)se.classList.add('hidden');
+  // Open equipment modal with captured image and context
+  openEqModal(null,editingEqContext,dataURL);
+  if(result)prefillModal(result);
+}
 
 // ── OCR ───────────────────────────────────────────────────────────
 function stopCamera(){if(cameraStream){cameraStream.getTracks().forEach(t=>t.stop());cameraStream=null;}}
@@ -1360,39 +1530,256 @@ async function renderPhotoRows(){
 async function addPhotoRow(){const rows=await getPhotoReport();rows.push({photo:null,comment:''});await savePhotoReport(rows);renderPhotoRows();}
 
 // ── INCIDENT ──────────────────────────────────────────────────────
-async function loadIncidentData(){const rec=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,objet:'',fields:[],conclusion:''};document.getElementById('incident-objet').value=rec.objet||'';document.getElementById('incident-conclusion').value=rec.conclusion||'';renderIncidentFields(rec.fields||[]);['incident-objet','incident-conclusion'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('change',saveIncidentData);});}
+async function loadIncidentData(){
+  const zone=document.getElementById('incident-full-zone');
+  if(!zone)return;
+  const rec=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,objet:'',fields:[],conclusion:'',participants:[]};
+  const m=missions.find(x=>x.id===currentMissionId);
+  const site=sites.find(s=>s.id===m?.siteId);
+
+  // Build full single-page incident form
+  zone.innerHTML='';
+
+  // Header
+  const hdr=document.createElement('div');hdr.className='settings-card';
+  hdr.innerHTML=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:22px">🚨</span><div><div style="font-family:var(--font-display);font-size:18px;font-weight:700">Rapport d'incident</div><div style="color:var(--text-secondary);font-size:12px">${esc(site?.name||'')} · ${m?.dateStart||''}</div></div></div>`;
+  zone.appendChild(hdr);
+
+  // Objet
+  const objCard=document.createElement('div');objCard.className='settings-card';
+  objCard.innerHTML="<h3>📝 Objet de l'incident</h3>";
+  const objTa=document.createElement('textarea');objTa.id='incident-objet';objTa.placeholder="Description du constat, nature de l'incident...";objTa.rows=4;objTa.style.cssText='width:100%;resize:none;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text-primary);font-size:13px;outline:none;font-family:var(--font-body)';
+  objTa.value=rec.objet||'';
+  objTa.addEventListener('change',saveIncidentData);
+  objCard.appendChild(objTa);zone.appendChild(objCard);
+
+  // Champs libres
+  const fieldsCard=document.createElement('div');fieldsCard.className='settings-card';
+  fieldsCard.innerHTML='<h3>📋 Données relevées</h3>';
+  const fieldsList=document.createElement('div');fieldsList.id='incident-fields-list';
+  const renderFields=(fields)=>{
+    fieldsList.innerHTML='';
+    fields.forEach((f,idx)=>{
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px';
+      const lbl=document.createElement('div');lbl.style.cssText='flex:1;font-family:var(--font-mono);font-size:12px;color:var(--text-secondary)';lbl.textContent=f.label;
+      const inp=document.createElement('input');inp.type='text';inp.value=f.value||'';inp.placeholder='Valeur...';
+      inp.style.cssText='flex:1;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-primary);font-size:13px;outline:none';
+      inp.addEventListener('change',async()=>{
+        const r=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,fields:[]};
+        if(r.fields[idx])r.fields[idx].value=inp.value;await dbPut('incidentdata',r);
+      });
+      const del=document.createElement('button');del.className='incident-field-del';del.textContent='✕';
+      del.addEventListener('click',async()=>{
+        const r=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,fields:[]};
+        r.fields.splice(idx,1);await dbPut('incidentdata',r);renderFields(r.fields);
+      });
+      row.appendChild(lbl);row.appendChild(inp);row.appendChild(del);fieldsList.appendChild(row);
+    });
+  };
+  renderFields(rec.fields||[]);
+  // Add field row
+  const addRow=document.createElement('div');addRow.style.cssText='display:flex;gap:8px;margin-top:8px';
+  const newFieldInp=document.createElement('input');newFieldInp.type='text';newFieldInp.placeholder='Libellé du champ...';
+  newFieldInp.style.cssText='flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);font-size:13px;outline:none';
+  const addFieldBtn=document.createElement('button');addFieldBtn.className='btn-primary btn-sm';addFieldBtn.style.cssText='width:auto;padding:8px 14px';addFieldBtn.textContent='＋';
+  addFieldBtn.addEventListener('click',async()=>{
+    const label=newFieldInp.value.trim();if(!label)return;
+    addFieldBtn.disabled=true;
+    const r=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,fields:[]};
+    r.fields.push({label,value:''});await dbPut('incidentdata',r);
+    newFieldInp.value='';addFieldBtn.disabled=false;
+    renderFields(r.fields);
+  });
+  newFieldInp.addEventListener('keydown',e=>{if(e.key==='Enter')addFieldBtn.click();});
+  addRow.appendChild(newFieldInp);addRow.appendChild(addFieldBtn);
+  fieldsCard.appendChild(fieldsList);fieldsCard.appendChild(addRow);zone.appendChild(fieldsCard);
+
+  // Participants
+  const partCard=document.createElement('div');partCard.className='settings-card';
+  partCard.innerHTML="<h3>👥 Personnes présentes</h3>";
+  const partList=document.createElement('div');partList.id='incident-participants-list';
+  const renderParticipants=()=>{
+    const participants=missions.find(x=>x.id===currentMissionId)?.participants||[];
+    partList.innerHTML='';
+    participants.forEach((p,pi)=>{
+      const card=document.createElement('div');card.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;position:relative';
+      const IS='background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text-primary);font-size:13px;outline:none;width:100%';
+      card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-family:var(--font-display);font-size:13px;font-weight:600;color:var(--accent2)">Personne ${pi+1}</span><button class="btn-del-comment">✕</button></div><div style="display:flex;flex-direction:column;gap:5px"><input type="text" placeholder="Nom / Prénom" value="${esc(p.nom||'')}" data-k="nom" style="${IS}"/><input type="text" placeholder="Société" value="${esc(p.societe||'')}" data-k="societe" style="${IS}"/><input type="text" placeholder="Email" value="${esc(p.email||'')}" data-k="email" style="${IS}"/><input type="text" placeholder="Téléphone" value="${esc(p.tel||'')}" data-k="tel" style="${IS}"/></div>`;
+      card.querySelector('.btn-del-comment').addEventListener('click',async()=>{
+        const mi=missions.findIndex(x=>x.id===currentMissionId);if(mi<0)return;
+        missions[mi].participants.splice(pi,1);await dbPut('missions',missions[mi]);renderParticipants();
+      });
+      card.querySelectorAll('input[data-k]').forEach(inp=>{
+        inp.addEventListener('change',async()=>{
+          const mi=missions.findIndex(x=>x.id===currentMissionId);if(mi<0)return;
+          if(!missions[mi].participants[pi])missions[mi].participants[pi]={};
+          missions[mi].participants[pi][inp.dataset.k]=inp.value;await dbPut('missions',missions[mi]);
+        });
+      });
+      partList.appendChild(card);
+    });
+  };
+  renderParticipants();
+  const addPartBtn=document.createElement('button');addPartBtn.className='btn-add-instance';addPartBtn.textContent='+ Ajouter une personne';
+  addPartBtn.addEventListener('click',async()=>{
+    const mi=missions.findIndex(x=>x.id===currentMissionId);if(mi<0)return;
+    if(!missions[mi].participants)missions[mi].participants=[];
+    missions[mi].participants.push({nom:'',societe:'',email:'',tel:''});
+    await dbPut('missions',missions[mi]);renderParticipants();
+  });
+  partCard.appendChild(partList);partCard.appendChild(addPartBtn);zone.appendChild(partCard);
+
+  // Photos inline
+  const photoCard=document.createElement('div');photoCard.className='settings-card';
+  photoCard.innerHTML='<h3>📸 Photos du constat</h3>';
+  const photoContainer=document.createElement('div');photoContainer.id='incident-photos';
+  const renderIncidentPhotos=async()=>{
+    const rows=await getPhotoReport();photoContainer.innerHTML='';
+    rows.forEach((row,idx)=>{
+      const div=document.createElement('div');div.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:10px';
+      div.innerHTML=`<div style="display:flex;gap:0;min-height:80px"><div style="width:120px;flex-shrink:0;background:var(--bg-elevated);display:flex;align-items:center;justify-content:center">${row.photo?`<img src="${row.photo}" style="width:120px;height:90px;object-fit:cover;cursor:pointer" class="inc-thumb"/>`:` <span style="font-size:24px;opacity:.3">📷</span>`}</div><div style="flex:1;padding:8px;display:flex;flex-direction:column;gap:6px"><textarea placeholder="Commentaire..." rows="2" class="inc-cmt" style="flex:1;resize:none;background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--text-primary);font-size:12px;outline:none;font-family:var(--font-body)">${esc(row.comment||'')}</textarea><div style="display:flex;gap:6px"><button class="inc-cam card-btn">📷</button><button class="inc-gal card-btn">🖼️</button><button class="inc-del card-btn" style="color:var(--danger)">🗑️</button></div></div></div>`;
+      if(row.photo)div.querySelector('.inc-thumb').addEventListener('click',()=>{const w=window.open();w.document.write(`<img src="${row.photo}" style="max-width:100%;display:block;margin:auto">`);});
+      div.querySelector('.inc-cmt').addEventListener('change',async e=>{const r=await getPhotoReport();r[idx].comment=e.target.value;await savePhotoReport(r);});
+      div.querySelector('.inc-cam').addEventListener('click',()=>{const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.capture='environment';inp.addEventListener('change',async e=>{if(!e.target.files[0])return;const reader=new FileReader();reader.onload=async ev=>{const r=await getPhotoReport();r[idx].photo=ev.target.result;await savePhotoReport(r);renderIncidentPhotos();};reader.readAsDataURL(e.target.files[0]);});inp.click();});
+      div.querySelector('.inc-gal').addEventListener('click',()=>{const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.addEventListener('change',async e=>{if(!e.target.files[0])return;const reader=new FileReader();reader.onload=async ev=>{const r=await getPhotoReport();r[idx].photo=ev.target.result;await savePhotoReport(r);renderIncidentPhotos();};reader.readAsDataURL(e.target.files[0]);});inp.click();});
+      div.querySelector('.inc-del').addEventListener('click',async()=>{if(!confirm('Supprimer ?'))return;const r=await getPhotoReport();r.splice(idx,1);await savePhotoReport(r);renderIncidentPhotos();});
+      photoContainer.appendChild(div);
+    });
+    const addPhotoBtn=document.createElement('button');addPhotoBtn.className='btn-add-instance';addPhotoBtn.textContent='+ Ajouter une photo';
+    addPhotoBtn.addEventListener('click',async()=>{const r=await getPhotoReport();r.push({photo:null,comment:''});await savePhotoReport(r);renderIncidentPhotos();});
+    photoContainer.appendChild(addPhotoBtn);
+  };
+  await renderIncidentPhotos();
+  photoCard.appendChild(photoContainer);zone.appendChild(photoCard);
+
+  // Conclusion
+  const conclCard=document.createElement('div');conclCard.className='settings-card';
+  conclCard.innerHTML='<h3>✅ Conclusion</h3>';
+  const conclSel=document.createElement('select');conclSel.id='incident-conclusion';
+  conclSel.style.cssText='width:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text-primary);font-size:13px;outline:none';
+  ['','urgent','surveiller','traite','info'].forEach((v,i)=>{
+    const o=document.createElement('option');o.value=v;o.textContent=['Sélectionner...','⚠️ Intervention urgente requise','👁️ À surveiller','✅ Traité sur place','ℹ️ Informatif'][i];
+    if(rec.conclusion===v)o.selected=true;conclSel.appendChild(o);
+  });
+  conclSel.addEventListener('change',saveIncidentData);
+  conclCard.appendChild(conclSel);zone.appendChild(conclCard);
+
+  // Export button
+  const expBtn=document.createElement('button');expBtn.className='btn-primary';expBtn.style.cssText='background:var(--danger);margin-top:4px';expBtn.textContent="🚨 Exporter rapport d'incident (PDF)";
+  expBtn.addEventListener('click',exportIncidentPDF);zone.appendChild(expBtn);
+}
 function renderIncidentFields(fields){const list=document.getElementById('incident-fields-list');if(!list)return;list.innerHTML='';fields.forEach((f,idx)=>{const row=document.createElement('div');row.className='incident-field-row';row.innerHTML=`<span class="incident-field-label" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">${esc(f.label)}</span>`;const inp=document.createElement('input');inp.type='text';inp.value=f.value||'';inp.placeholder='Valeur...';inp.style.cssText='background:var(--bg-elevated);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:var(--text-primary);font-size:13px;outline:none;width:120px';inp.addEventListener('change',async()=>{const rec=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,fields:[]};rec.fields[idx].value=inp.value;await dbPut('incidentdata',rec);});const del=document.createElement('button');del.className='incident-field-del';del.textContent='✕';del.addEventListener('click',async()=>{const rec=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,fields:[]};rec.fields.splice(idx,1);await dbPut('incidentdata',rec);renderIncidentFields(rec.fields);});row.appendChild(inp);row.appendChild(del);list.appendChild(row);});}
 async function addIncidentField(){const label=document.getElementById('incident-new-field').value.trim();if(!label)return;const rec=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,objet:'',fields:[],conclusion:''};if(!rec.fields)rec.fields=[];rec.fields.push({label,value:''});await dbPut('incidentdata',rec);document.getElementById('incident-new-field').value='';renderIncidentFields(rec.fields);}
 async function saveIncidentData(){const rec=await dbGet('incidentdata',currentMissionId)||{id:currentMissionId,fields:[]};rec.objet=document.getElementById('incident-objet').value;rec.conclusion=document.getElementById('incident-conclusion').value;await dbPut('incidentdata',rec);}
 
 // ── SETTINGS ─────────────────────────────────────────────────────
+function renderCategoriesOnly(){
+  const cl=document.getElementById('categories-list');if(!cl)return;
+  cl.innerHTML='';
+  const wrap=document.createElement('div');wrap.className='categories-list';
+  categories.forEach(cat=>{
+    const item=document.createElement('div');item.className='cat-item';
+    // Color picker dot
+    const dotWrap=document.createElement('div');dotWrap.style.cssText='display:flex;align-items:center;gap:6px;flex:1';
+    const dot=document.createElement('div');dot.className='cat-dot';dot.style.background=cat.color;dot.style.cursor='pointer';dot.title='Changer la couleur';
+    // Editable name
+    const nameEl=document.createElement('input');nameEl.type='text';nameEl.value=cat.name;
+    nameEl.style.cssText='background:none;border:none;color:var(--text-primary);font-size:13px;outline:none;flex:1;padding:0';
+    nameEl.addEventListener('change',async()=>{
+      const c=categories.find(x=>x.id===cat.id);if(c){c.name=nameEl.value.trim()||c.name;}
+      await dbPut('config',{key:'categories',value:categories});
+    });
+    dotWrap.appendChild(dot);dotWrap.appendChild(nameEl);
+    item.appendChild(dotWrap);
+    if(!(['chaudiere','bruleur','pompe','vanne','echangeur','ballon','electrique','autre'].includes(cat.id))){
+      const del=document.createElement('button');del.className='cat-del';del.textContent='✕';
+      del.addEventListener('click',()=>deleteCategory(cat.id));
+      item.appendChild(del);
+    }
+    wrap.appendChild(item);
+  });
+  cl.appendChild(wrap);
+}
+
 function renderSettings(){
   const ki=document.getElementById('gemini-key-input');if(ki&&geminiKey)ki.value=geminiKey;
-  const cl=document.getElementById('categories-list');cl.innerHTML='';const wrap=document.createElement('div');wrap.className='categories-list';
-  categories.forEach(cat=>{const item=document.createElement('div');item.className='cat-item';item.innerHTML=`<div class="cat-dot" style="background:${cat.color}"></div><span style="flex:1;font-size:13px">${esc(cat.name)}</span>`;if(!DEFAULT_CATEGORIES.find(d=>d.id===cat.id)){const del=document.createElement('button');del.className='cat-del';del.textContent='✕';del.addEventListener('click',()=>deleteCategory(cat.id));item.appendChild(del);}wrap.appendChild(item);});cl.appendChild(wrap);
+  renderCategoriesOnly();
   // Stats
   document.getElementById('stats-container').innerHTML=`<div class="stats-grid"><div class="stat-item"><div class="stat-value">${sites.length}</div><div class="stat-label">SITES</div></div><div class="stat-item"><div class="stat-value">${missions.length}</div><div class="stat-label">MISSIONS</div></div><div class="stat-item"><div class="stat-value">${equipments.length}</div><div class="stat-label">MATÉRIELS</div></div><div class="stat-item"><div class="stat-value">${users.length}</div><div class="stat-label">UTILISATEURS</div></div></div>`;
   // Users in settings
   renderSettingsUsers();
 }
 function renderSettingsUsers(){
+  // Create panel if needed
   let usersPanel=document.getElementById('settings-users-panel');
   if(!usersPanel){
     usersPanel=document.createElement('div');usersPanel.id='settings-users-panel';usersPanel.className='settings-card';
-    usersPanel.innerHTML=`<h3>👤 Utilisateurs</h3><div id="users-list-settings" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div><div style="display:flex;gap:8px"><input type="text" id="new-user-prenom" placeholder="Prénom" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);font-size:13px;outline:none"/><input type="text" id="new-user-nom" placeholder="Nom" style="flex:1;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);font-size:13px;outline:none"/></div><input type="text" id="new-user-email" placeholder="Email" style="width:100%;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);font-size:13px;outline:none;margin-top:6px"/><button class="btn-primary" id="btn-add-user" style="margin-top:6px">+ Ajouter utilisateur</button>`;
-    document.getElementById('stats-container').parentElement?.after(usersPanel);
-    document.getElementById('btn-add-user').addEventListener('click',addUser);
+    // Find settings container and append
+    const sc=document.querySelector('#view-settings .settings-content,#view-settings');
+    if(sc)sc.appendChild(usersPanel);
   }
-  const list=document.getElementById('users-list-settings');list.innerHTML='';
+  usersPanel.innerHTML=`<h3>👤 Utilisateurs</h3>
+    <div id="users-list-settings" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+    <div class="settings-form-row">
+      <input type="text" id="new-user-prenom" placeholder="Prénom" class="settings-input"/>
+      <input type="text" id="new-user-nom" placeholder="Nom" class="settings-input"/>
+    </div>
+    <input type="text" id="new-user-email" placeholder="Email" class="settings-input" style="margin-top:6px;width:100%"/>
+    <button class="btn-primary" id="btn-add-user" style="margin-top:8px">+ Ajouter utilisateur</button>`;
+  document.getElementById('btn-add-user')?.addEventListener('click',addUser);
+
+  const list=document.getElementById('users-list-settings');
+  if(!list)return;
+  list.innerHTML='';
+  if(!users.length){list.innerHTML='<p style="color:var(--text-muted);font-size:13px">Aucun utilisateur.</p>';return;}
+
   users.forEach(u=>{
-    const item=document.createElement('div');item.className='user-card'+(currentUser?.id===u.id?' active-user':'');
-    item.innerHTML=`<div class="user-avatar">${(u.prenom||u.nom||'?')[0].toUpperCase()}</div><div class="user-info"><div class="user-name">${esc(u.prenom+' '+u.nom)}</div><div class="user-email">${esc(u.email||'')}</div></div>`;
-    const del=document.createElement('button');del.className='card-btn';del.textContent='🗑️';del.addEventListener('click',async()=>{await dbDel('users',u.id);users=users.filter(x=>x.id!==u.id);if(currentUser?.id===u.id){currentUser=null;await dbDel('config','currentUser');}renderSettingsUsers();});
-    const selBtn=document.createElement('button');selBtn.className='btn-sm btn-primary';selBtn.style.cssText='width:auto;padding:5px 10px;font-size:11px';selBtn.textContent='Choisir';
-    selBtn.addEventListener('click',async()=>{currentUser=u;await dbPut('config',{key:'currentUser',value:u});showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');renderSettingsUsers();});
-    item.appendChild(selBtn);item.appendChild(del);list.appendChild(item);
+    const isActive=currentUser?.id===u.id;
+    const item=document.createElement('div');
+    item.className='user-card'+(isActive?' active-user':'');
+    item.style.cssText='display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)';
+    if(isActive)item.style.borderColor='var(--accent)';
+
+    const avatar=document.createElement('div');avatar.className='user-avatar';
+    avatar.textContent=((u.prenom||u.nom||'?')[0]).toUpperCase();
+
+    const info=document.createElement('div');info.style.flex='1';
+    info.innerHTML=`<div class="user-name">${esc(u.prenom||'')} ${esc(u.nom||'')}</div><div class="user-email">${esc(u.email||'')}</div>`;
+
+    const actions=document.createElement('div');actions.style.cssText='display:flex;gap:6px;align-items:center';
+
+    if(isActive){
+      const badge=document.createElement('span');badge.style.cssText='color:var(--accent);font-size:13px;font-weight:700';badge.textContent='✓ Actif';
+      actions.appendChild(badge);
+    }else{
+      const selBtn=document.createElement('button');selBtn.className='btn-primary btn-sm';
+      selBtn.style.cssText='width:auto;padding:6px 12px;font-size:12px';selBtn.textContent='Choisir';
+      selBtn.addEventListener('click',async(e)=>{
+        e.stopPropagation();
+        currentUser=u;
+        await dbPut('config',{key:'currentUser',value:u});
+        showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
+        renderSettingsUsers(); // refresh list
+      });
+      actions.appendChild(selBtn);
+    }
+
+    const del=document.createElement('button');del.className='card-btn';del.textContent='🗑️';del.title='Supprimer';
+    del.addEventListener('click',async(e)=>{
+      e.stopPropagation();
+      if(!confirm(`Supprimer ${u.prenom} ${u.nom} ?`))return;
+      await dbDel('users',u.id);users=users.filter(x=>x.id!==u.id);
+      if(currentUser?.id===u.id){currentUser=null;await dbDel('config','currentUser');}
+      renderSettingsUsers();
+    });
+    actions.appendChild(del);
+
+    item.appendChild(avatar);item.appendChild(info);item.appendChild(actions);
+    list.appendChild(item);
   });
 }
+
 async function addUser(){
   const prenom=document.getElementById('new-user-prenom').value.trim();
   const nom=document.getElementById('new-user-nom').value.trim();
@@ -1403,17 +1790,297 @@ async function addUser(){
   renderSettingsUsers();showToast('Utilisateur ajouté ✓','success');
 }
 async function saveGeminiKey(){geminiKey=document.getElementById('gemini-key-input').value.trim();await dbPut('config',{key:'geminiKey',value:geminiKey});const el=document.getElementById('gemini-status');el.textContent=geminiKey?'✓ Clé sauvegardée':'Clé supprimée';el.className='settings-status'+(geminiKey?' success':'');setTimeout(()=>{if(el){el.textContent='';el.className='settings-status';}},3000);showToast(geminiKey?'Clé Gemini sauvegardée ✓':'Clé supprimée','success');}
-async function addCategory(){const inp=document.getElementById('new-cat-input'),name=inp.value.trim();if(!name)return;const colors=['#f43f5e','#f97316','#eab308','#84cc16','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#d946ef'];const id=name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'')+'_'+Date.now();categories.push({id,name,color:colors[categories.length%colors.length]});await dbPut('config',{key:'categories',value:categories});inp.value='';renderSettings();}
-async function deleteCategory(id){if(equipments.some(e=>e.category===id)){showToast('Catégorie utilisée','error');return;}categories=categories.filter(c=>c.id!==id);await dbPut('config',{key:'categories',value:categories});renderSettings();}
+async function addCategory(){
+  const inp=document.getElementById('new-cat-input');
+  const name=inp.value.trim();
+  if(!name)return;
+  // Prevent double-click duplicates
+  inp.disabled=true;
+  const colors=['#f43f5e','#f97316','#eab308','#84cc16','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#d946ef'];
+  const id=name.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'')+'_'+Date.now();
+  categories.push({id,name,color:colors[categories.length%colors.length]});
+  await dbPut('config',{key:'categories',value:categories});
+  inp.value='';inp.disabled=false;
+  // Immediate targeted re-render of just the categories list
+  renderCategoriesOnly();
+  showToast('Catégorie ajoutée ✓','success');
+}
+async function deleteCategory(id){
+  if(equipments.some(e=>e.category===id)){showToast('Catégorie utilisée — réassignez d\'abord les équipements','error');return;}
+  if(!confirm('Supprimer cette catégorie ?'))return;
+  categories=categories.filter(c=>c.id!==id);
+  await dbPut('config',{key:'categories',value:categories});
+  renderCategoriesOnly();
+  showToast('Catégorie supprimée');
+}
 async function clearAll(){if(!confirm('Effacer TOUTES les données ?'))return;for(const s of sites)await dbDel('sites',s.id);for(const m of missions)await dbDel('missions',m.id);for(const e of equipments)await dbDel('equipments',e.id);for(const f of formDataStore)await dbDel('formdata',f.id);sites=[];missions=[];equipments=[];formDataStore=[];renderSettings();renderSites();showToast('Données effacées');}
 function backupData(){download(JSON.stringify({version:4,app:'adiatool',exportedAt:new Date().toISOString(),sites,missions,equipments:equipments.map(e=>({...e,photo:null})),formDataStore,users,categories},null,2),`adiatool_backup_${today()}.json`,'application/json');showToast('Sauvegarde téléchargée');}
 async function restoreData(file){try{const data=JSON.parse(await file.text());if(!data.sites)throw new Error('Format invalide');if(!confirm(`Restaurer ${data.sites.length} sites ?`))return;for(const s of sites)await dbDel('sites',s.id);for(const m of missions)await dbDel('missions',m.id);for(const e of equipments)await dbDel('equipments',e.id);for(const f of formDataStore)await dbDel('formdata',f.id);sites=[];missions=[];equipments=[];formDataStore=[];for(const s of data.sites){await dbPut('sites',s);sites.push(s);}for(const m of data.missions){await dbPut('missions',m);missions.push(m);}for(const e of data.equipments){await dbPut('equipments',e);equipments.push(e);}if(data.formDataStore)for(const f of data.formDataStore){await dbPut('formdata',f);formDataStore.push(f);}if(data.users)for(const u of data.users){await dbPut('users',u);users.push(u);}if(data.categories){categories=data.categories;await dbPut('config',{key:'categories',value:categories});}renderSettings();renderSites();showToast('Restauration réussie ✓','success');}catch(e){showToast('Erreur: '+e.message,'error');}}
 
 // ── EXPORTS (shortened - same as v3) ─────────────────────────────
+// ── REPORT TAB ─────────────────────────────────────────────────────
+function initReportTab(){
+  // Cover photo
+  const coverImg=document.getElementById('cover-photo-img');
+  const coverPlaceholder=document.getElementById('cover-photo-placeholder');
+  const coverRemove=document.getElementById('btn-cover-remove');
+  // Load saved cover photo
+  const stored=sessionStorage.getItem('cover_photo_'+currentMissionId);
+  if(stored){coverImg.src=stored;coverImg.style.display='block';coverPlaceholder.style.display='none';coverRemove.style.display='';}
+  else{coverImg.style.display='none';coverPlaceholder.style.display='flex';coverRemove.style.display='none';}
+
+  // Load saved conclusion
+  const savedConclusion=sessionStorage.getItem('conclusion_'+currentMissionId)||'';
+  const conclEl=document.getElementById('report-conclusion-text');
+  if(conclEl&&!conclEl.value)conclEl.value=savedConclusion;
+  if(conclEl)conclEl.addEventListener('input',()=>sessionStorage.setItem('conclusion_'+currentMissionId,conclEl.value));
+
+  const setCoverPhoto=(dataURL)=>{
+    sessionStorage.setItem('cover_photo_'+currentMissionId,dataURL);
+    coverImg.src=dataURL;coverImg.style.display='block';
+    coverPlaceholder.style.display='none';coverRemove.style.display='';
+  };
+
+  // Prevent duplicate listeners
+  const cameraBtn=document.getElementById('btn-cover-camera');
+  const galleryBtn=document.getElementById('btn-cover-gallery');
+  const fileInput=document.getElementById('cover-photo-input');
+  const newCameraBtn=cameraBtn.cloneNode(true);const newGalleryBtn=galleryBtn.cloneNode(true);
+  cameraBtn.replaceWith(newCameraBtn);galleryBtn.replaceWith(newGalleryBtn);
+
+  document.getElementById('btn-cover-camera').addEventListener('click',()=>{
+    const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.capture='environment';
+    inp.addEventListener('change',e=>{if(!e.target.files[0])return;const r=new FileReader();r.onload=ev=>setCoverPhoto(ev.target.result);r.readAsDataURL(e.target.files[0]);});inp.click();
+  });
+  document.getElementById('btn-cover-gallery').addEventListener('click',()=>{
+    const inp=document.createElement('input');inp.type='file';inp.accept='image/*';
+    inp.addEventListener('change',e=>{if(!e.target.files[0])return;const r=new FileReader();r.onload=ev=>setCoverPhoto(ev.target.result);r.readAsDataURL(e.target.files[0]);});inp.click();
+  });
+  document.getElementById('btn-cover-remove')?.addEventListener('click',()=>{
+    sessionStorage.removeItem('cover_photo_'+currentMissionId);
+    coverImg.style.display='none';coverPlaceholder.style.display='flex';
+    document.getElementById('btn-cover-remove').style.display='none';
+  });
+}
+
+
 function exportCSV(){const mission=missions.find(m=>m.id===currentMissionId);const site=sites.find(s=>s.id===mission?.siteId);const mEqs=equipments.filter(e=>e.missionId===currentMissionId);if(!mEqs.length){showToast('Aucun matériel','error');return;}const headers=['Code affaire','Site','Type mission','Module','Catégorie','Désignation','Marque','Modèle','N° Série','Année','Puissance','Fluide','Localisation','État','Observations'];const rows=mEqs.map(eq=>{const cat=categories.find(c=>c.id===eq.category)?.name||eq.category;const modLabel=FORM_MODULES.find(m=>m.id===eq.moduleId)?.label||eq.moduleId||'';return[site?.codeAffaire,site?.name,TL[mission?.type],modLabel,cat,eq.name,eq.brand,eq.model,eq.serial,eq.year,eq.power,eq.fluid,eq.location,{bon:'Bon état',correct:'Correct',degrade:'Dégradé',hs:'Hors service'}[eq.condition],eq.notes].map(x=>`"${(x||'').toString().replace(/"/g,'""')}"`);}); download('\uFEFF'+[headers.join(';'),...rows.map(r=>r.join(';'))].join('\r\n'),`adiatool_materiels_${today()}.csv`,'text/csv;charset=utf-8;');showToast('CSV exporté');}
 async function exportExcel(){showToast('Export Excel — utilisez le PDF pour un rapport complet','');exportCSV();}
-async function exportWord(){showToast('Export Word disponible via le rapport PDF','');}
-async function exportPDF(){showToast('Export PDF — fonctionnalité complète en cours','');}
+async function exportWord(){
+  showToast('Génération du rapport Word...','');
+  const mission=missions.find(m=>m.id===currentMissionId);
+  const site=sites.find(s=>s.id===mission?.siteId);
+  const fd=getMFD();
+  const notesRec=await dbGet('notes',currentMissionId);
+  const photoRec=await dbGet('photoreport',currentMissionId);
+  const mEqs=equipments.filter(e=>e.missionId===currentMissionId);
+
+  const inclReleves=document.getElementById('rpt-releves')?.checked!==false;
+  const inclNotes=document.getElementById('rpt-notes')?.checked!==false;
+  const inclPhotos=document.getElementById('rpt-photos')?.checked!==false;
+  const inclMateriels=document.getElementById('rpt-materiels')?.checked!==false;
+
+  const coverPhoto=sessionStorage.getItem('cover_photo_'+currentMissionId)||'';
+  const conclusion=document.getElementById('report-conclusion-text')?.value||'';
+  const dateStr=new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'});
+
+  const yn=(v)=>({oui:"Oui",non:"Non",na:"N/A",pi:"Pas d'info",yes:"Oui",no:"Non"}[v]||v||"—");
+
+  // Build HTML that Word/Pages can open
+  let body='';
+
+  // ── PAGE DE GARDE ──
+  body+=`
+  <div style="page-break-after:always;min-height:25cm;display:flex;flex-direction:column;justify-content:space-between;padding:2cm">
+    ${coverPhoto?`<div style="text-align:center;margin-bottom:20mm"><img src="${coverPhoto}" style="max-width:100%;max-height:12cm;object-fit:cover;border-radius:8px"/></div>`:'<div style="height:12cm;background:#f0f4f8;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:20mm"><span style="color:#aaa;font-size:24pt">🏢</span></div>'}
+    <div>
+      <div style="font-size:28pt;font-weight:700;color:#1e3f5e;margin-bottom:8mm">${esc(TL[mission?.type]||mission?.type||'Rapport')}</div>
+      <div style="font-size:18pt;color:#333;margin-bottom:4mm">${esc(site?.name||'')}</div>
+      <div style="font-size:12pt;color:#666;margin-bottom:2mm">${[site?.address,site?.zip,site?.city].filter(Boolean).join(', ')}</div>
+      ${site?.codeAffaire?`<div style="font-size:11pt;color:#888">Code affaire : ${esc(site.codeAffaire)}</div>`:''}
+    </div>
+    <div style="border-top:2px solid #1e7fd4;padding-top:8mm;display:flex;justify-content:space-between">
+      <div style="color:#666;font-size:10pt">Intervenant : ${esc(mission?.operator||'')}</div>
+      <div style="color:#666;font-size:10pt">${mission?.dateStart||dateStr}</div>
+    </div>
+    <div style="text-align:center;margin-top:4mm"><div style="font-family:monospace;font-size:14pt;letter-spacing:4px;color:#1e7fd4;font-weight:700">ADIATHERM</div></div>
+  </div>`;
+
+  // ── SOMMAIRE ──
+  body+=`<div style="page-break-after:always;padding:1.5cm">
+    <h1 style="color:#1e3f5e;border-bottom:3px solid #1e7fd4;padding-bottom:5mm;font-size:20pt">Sommaire</h1>
+    <div style="margin-top:10mm;font-size:12pt;line-height:2.2">
+      <div>1. Informations générales</div>
+      ${inclReleves?'<div>2. Relevés techniques</div>':''}
+      ${inclNotes&&notesRec?.text?'<div>3. Notes de visite</div>':''}
+      ${inclPhotos&&photoRec?.rows?.length?'<div>4. Reportage photographique</div>':''}
+      ${conclusion?'<div>5. Conclusion</div>':''}
+      ${inclMateriels&&mEqs.length?'<div>6. Annexe — Synthèse matériels</div>':''}
+    </div>
+  </div>`;
+
+  // ── INFORMATIONS GÉNÉRALES ──
+  body+=`<div style="page-break-after:always;padding:1.5cm">
+    <h1 style="color:#1e3f5e;border-bottom:3px solid #1e7fd4;padding-bottom:5mm;font-size:20pt">1. Informations générales</h1>
+    <table style="width:100%;border-collapse:collapse;margin-top:8mm;font-size:11pt">
+      <tr><td colspan="2" style="background:#1e3f5e;color:white;padding:6px 10px;font-weight:700">SITE</td></tr>
+      ${[['Nom',site?.name],['Code affaire',site?.codeAffaire],['Adresse',[site?.address,site?.zip,site?.city].filter(Boolean).join(', ')],['Énergie',site?.energie],['Contact',site?.contact]].filter(([,v])=>v).map(([l,v])=>`<tr><td style="padding:5px 10px;border:1px solid #dee;background:#f8f9fa;width:35%;color:#555">${l}</td><td style="padding:5px 10px;border:1px solid #dee">${esc(String(v))}</td></tr>`).join('')}
+      <tr><td colspan="2" style="background:#1e3f5e;color:white;padding:6px 10px;font-weight:700;margin-top:4mm">MISSION</td></tr>
+      ${[['Type',TL[mission?.type]],['Date',mission?.dateStart],['Intervenant',mission?.operator],['Référence',mission?.ref],['Statut',SL[mission?.status]]].filter(([,v])=>v).map(([l,v])=>`<tr><td style="padding:5px 10px;border:1px solid #dee;background:#f8f9fa;width:35%;color:#555">${l}</td><td style="padding:5px 10px;border:1px solid #dee">${esc(String(v))}</td></tr>`).join('')}
+    </table>
+  </div>`;
+
+  // ── RELEVÉS ──
+  if(inclReleves){
+    const locaux=fd.locaux||[];
+    body+=`<div style="padding:1.5cm">
+      <h1 style="color:#1e3f5e;border-bottom:3px solid #1e7fd4;padding-bottom:5mm;font-size:20pt">2. Relevés techniques</h1>`;
+    locaux.forEach((loc,li)=>{
+      const lk=`local_${li}`;
+      const lfd=(fd.localData||{})[lk]||{data:{},repeatData:{},comments:{}};
+      const activeModules=(fd.localModules||{})[lk]||[];
+      if(!activeModules.length)return;
+      body+=`<h2 style="color:#1e7fd4;margin-top:8mm;font-size:15pt">${esc(loc.nom?`${loc.type} — ${loc.nom}`:loc.type||`Local ${li+1}`)}</h2>`;
+      FORM_MODULES.forEach(mod=>{
+        if(!activeModules.includes(mod.id))return;
+        body+=`<h3 style="color:#333;font-size:12pt;margin-top:6mm;border-bottom:1px solid #ccc;padding-bottom:2mm">${mod.icon} ${mod.label}</h3>`;
+        if(mod.repeatable){
+          const instances=(lfd.repeatData[mod.id]||[{}]);
+          instances.forEach((inst,idx)=>{
+            if(instances.length>1)body+=`<div style="font-weight:600;color:#1e7fd4;font-size:11pt;margin-top:4mm">${mod.repeatLabel} ${idx+1}</div>`;
+            body+=`<table style="width:100%;border-collapse:collapse;font-size:10pt;margin-top:3mm">`;
+            mod.fields.filter(f=>f.type!=='section'&&f.type!=='equipment_inline'&&f.type!=='mesures_chauf'&&f.type!=='mesures_temp'&&f.type!=='mesures_libres'&&f.type!=='courbe_chauffe'&&f.type!=='decalage_stepper').forEach(f=>{
+              const val=inst[f.id]||'';if(!val)return;
+              body+=`<tr><td style="padding:4px 8px;border:1px solid #eee;background:#f8f9fa;width:40%;color:#555;font-size:9pt">${esc(f.label)}</td><td style="padding:4px 8px;border:1px solid #eee">${esc(f.type==='yesno3'||f.type==='yesno'?yn(val):String(val))}</td></tr>`;
+              // Comments
+              const ck=`${mod.id}_${f.id}_${idx}`;
+              const cmts=(lfd.comments||{})[ck]||[];
+              cmts.forEach(c=>{body+=`<tr><td colspan="2" style="padding:2px 8px 2px 20px;border:1px solid #eee;font-style:italic;color:${c.type==='pos'?'#166534':c.type==='neg'?'#991b1b':'#6b7280'};font-size:9pt">${c.type==='pos'?'✅':c.type==='neg'?'⚠️':'—'} ${esc(c.text)}</td></tr>`;});
+            });
+            body+=`</table>`;
+          });
+        }else{
+          const data=lfd.data[mod.id]||{};
+          const allF=mod.sections?mod.sections.flatMap(s=>[{type:'__sec',label:s.title},...s.fields]):(mod.fields||[]);
+          body+=`<table style="width:100%;border-collapse:collapse;font-size:10pt;margin-top:3mm">`;
+          allF.forEach(f=>{
+            if(f.type==='__sec'||f.type==='section'){body+=`<tr><td colspan="2" style="padding:5px 8px;background:#e8f0f8;color:#1e3f5e;font-weight:700;font-size:9pt;text-transform:uppercase;letter-spacing:0.5px">${esc(f.label)}</td></tr>`;return;}
+            if(['equipment_inline','mesures_chauf','mesures_temp','mesures_libres','courbe_chauffe','decalage_stepper'].includes(f.type))return;
+            const val=data[f.id]||'';if(!val)return;
+            body+=`<tr><td style="padding:4px 8px;border:1px solid #eee;background:#f8f9fa;width:40%;color:#555;font-size:9pt">${esc(f.label)}</td><td style="padding:4px 8px;border:1px solid #eee">${esc(f.type==='yesno3'||f.type==='yesno'?yn(val):String(val))}</td></tr>`;
+            const ck=`${mod.id}_${f.id}`;const cmts=(lfd.comments||{})[ck]||[];
+            cmts.forEach(c=>{body+=`<tr><td colspan="2" style="padding:2px 8px 2px 20px;border:1px solid #eee;font-style:italic;color:${c.type==='pos'?'#166534':c.type==='neg'?'#991b1b':'#6b7280'};font-size:9pt">${c.type==='pos'?'✅':c.type==='neg'?'⚠️':'—'} ${esc(c.text)}</td></tr>`;});
+          });
+          body+=`</table>`;
+        }
+      });
+    });
+    body+=`</div>`;
+  }
+
+  // ── NOTES ──
+  if(inclNotes&&notesRec?.text){
+    body+=`<div style="page-break-before:always;padding:1.5cm">
+      <h1 style="color:#1e3f5e;border-bottom:3px solid #1e7fd4;padding-bottom:5mm;font-size:20pt">3. Notes de visite</h1>
+      <div style="background:#fff8f0;border-left:4px solid #1e7fd4;padding:10mm;margin-top:8mm;font-size:11pt;line-height:1.7;white-space:pre-wrap">${esc(notesRec.text)}</div>
+    </div>`;
+  }
+
+  // ── PHOTOS ──
+  if(inclPhotos&&photoRec?.rows?.length){
+    body+=`<div style="page-break-before:always;padding:1.5cm">
+      <h1 style="color:#1e3f5e;border-bottom:3px solid #1e7fd4;padding-bottom:5mm;font-size:20pt">4. Reportage photographique</h1>`;
+    const photoRows=photoRec.rows;
+    for(let i=0;i<photoRows.length;i+=2){
+      body+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6mm;margin-top:6mm">`;
+      for(let j=i;j<Math.min(i+2,photoRows.length);j++){
+        const row=photoRows[j];
+        body+=`<div style="border:1px solid #dee;border-radius:6px;overflow:hidden">
+          ${row.photo?`<img src="${row.photo}" style="width:100%;aspect-ratio:4/3;object-fit:cover;display:block"/>`:'<div style="aspect-ratio:4/3;background:#f0f0f0;display:flex;align-items:center;justify-content:center;color:#aaa">Pas de photo</div>'}
+          <div style="padding:6px 8px;font-size:9pt;color:#444;line-height:1.4;min-height:24px">${esc(row.comment||'')}</div>
+        </div>`;
+      }
+      body+=`</div>`;
+    }
+    body+=`</div>`;
+  }
+
+  // ── CONCLUSION ──
+  if(conclusion){
+    body+=`<div style="page-break-before:always;padding:1.5cm">
+      <h1 style="color:#1e3f5e;border-bottom:3px solid #1e7fd4;padding-bottom:5mm;font-size:20pt">5. Conclusion</h1>
+      <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:10mm;margin-top:8mm;font-size:12pt;line-height:1.8;white-space:pre-wrap">${esc(conclusion)}</div>
+    </div>`;
+  }
+
+  // ── ANNEXE MATÉRIELS ──
+  if(inclMateriels&&mEqs.length){
+    const moduleOrder=['primaire','chauffage','ecs','autres_materiels'];
+    body+=`<div style="page-break-before:always;padding:1.5cm">
+      <h1 style="color:#1e3f5e;border-bottom:3px solid #1e7fd4;padding-bottom:5mm;font-size:20pt">6. Annexe — Synthèse matériels</h1>`;
+    moduleOrder.forEach(modId=>{
+      const grpEqs=mEqs.filter(e=>(e.moduleId||'').replace(/_\d+$/,'')===modId||(e.moduleContext||'').replace(/_\d+$/,'')===modId);
+      if(!grpEqs.length)return;
+      const mod=FORM_MODULES.find(m=>m.id===modId);
+      body+=`<h2 style="color:#1e7fd4;font-size:13pt;margin-top:8mm">${mod?.icon||''} ${mod?.label||modId}</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:10pt;margin-top:4mm">
+        <tr style="background:#1e3f5e;color:white"><th style="padding:5px 8px;text-align:left">Désignation</th><th style="padding:5px 8px;text-align:left">Marque / Modèle</th><th style="padding:5px 8px;text-align:left">N° Série</th><th style="padding:5px 8px;text-align:left">Puissance</th><th style="padding:5px 8px;text-align:left">État</th></tr>`;
+      grpEqs.forEach((eq,i)=>{
+        const CLE={bon:'Bon état',correct:'Correct',degrade:'Dégradé',hs:'Hors service'};
+        body+=`<tr style="background:${i%2===0?'#f8f9fa':'white'}"><td style="padding:4px 8px;border:1px solid #eee">${esc(eq.name||'—')}</td><td style="padding:4px 8px;border:1px solid #eee">${esc([eq.brand,eq.model].filter(Boolean).join(' '))}</td><td style="padding:4px 8px;border:1px solid #eee;font-family:monospace;font-size:9pt">${esc(eq.serial||'—')}</td><td style="padding:4px 8px;border:1px solid #eee">${esc(eq.power||'—')}</td><td style="padding:4px 8px;border:1px solid #eee">${esc(CLE[eq.condition]||'—')}</td></tr>`;
+      });
+      body+=`</table>`;
+    });
+    body+=`</div>`;
+  }
+
+  // ── PIED DE PAGE ──
+  const footerNote=`<div style="text-align:center;color:#aaa;font-size:8pt;margin-top:15mm;padding-top:5mm;border-top:1px solid #eee">ADIATOOL — ${dateStr} — ${esc(site?.name||'')} — Document généré automatiquement</div>`;
+
+  const fullHtml=`<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width"/>
+<title>Rapport — ${esc(site?.name||'')} — ${mission?.dateStart||''}</title>
+<style>
+  @page{size:A4;margin:15mm}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#222;margin:0;padding:0}
+  h1,h2,h3{font-family:Arial,Helvetica,sans-serif}
+  table{page-break-inside:avoid}
+  img{max-width:100%}
+  .page-break{page-break-before:always}
+</style>
+</head>
+<body>
+${body}
+${footerNote}
+</body>
+</html>`;
+
+  // On iPhone: open in new tab — user can share to Files/Pages/Word
+  // On desktop: download as .html (opens in Word via File > Open)
+  const blob=new Blob([fullHtml],{type:'application/vnd.ms-word;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const filename=`Rapport_${slugify(site?.name||'ADIATHERM')}_${mission?.dateStart||today()}.doc`;
+
+  // Try download first, fallback to new tab (better for iPhone)
+  const a=document.createElement('a');a.href=url;a.download=filename;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+  showToast('Rapport Word généré — ouvrir avec Word ou Pages','success');
+}
+async function exportPDF(){
+  // On iPhone, the Word export opens in Pages/Word which can export to PDF
+  // Direct print-to-PDF is unreliable on iPhone Safari
+  // Instead: open a print-friendly HTML page
+  showToast('Utilisez l\'export Word puis "Enregistrer en PDF" depuis Pages ou Word','');
+  // Still open a printable version for desktop users
+  const mission=missions.find(m=>m.id===currentMissionId);
+  const site=sites.find(s=>s.id===mission?.siteId);
+  const html=`<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>@page{size:A4;margin:15mm}body{font-family:Arial,sans-serif;font-size:10pt}</style></head><body><h1>${esc(TL[mission?.type]||'')} — ${esc(site?.name||'')}</h1><p>Pour un rapport complet, utilisez l'export Word.</p><script>window.onload=()=>{if(navigator.userAgent.includes('iPhone')||navigator.userAgent.includes('iPad')){document.body.innerHTML+='<p>Sur iPhone/iPad : utilisez l\'export Word puis partagez vers Pages ou Word.</p>';}else{window.print();}}<\/script></body></html>`;
+  window.open(URL.createObjectURL(new Blob([html],{type:'text/html'})),'_blank');
+}
 async function exportIncidentPDF(){showToast('Rapport d\'incident PDF — en cours','');}
 
 // ── XLSX / UTILS ──────────────────────────────────────────────────

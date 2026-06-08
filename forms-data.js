@@ -16,13 +16,13 @@ const FORM_MODULES = [
     fields: [
       { id: 'local_localisation', label: 'Localisation du local', type: 'text', placeholder: 'Ex: Sous-sol niveau -1, bâtiment B' },
       {
-        id: 'puissance_chaudiere', label: 'Puissance installée',
-        type: 'select', options: ['< 70 kW','≥ 70 kW et < 400 kW','≥ 400 kW et < 1 MW','≥ 1 MW'],
+        id: 'type_chaufferie', label: 'Type de production',
+        type: 'select', options: ['Chauffage seul','Chauffage + ECS','ECS seule'],
         showForTypes: ['Chaufferie','Sous-station principale','Sous-station']
       },
       {
-        id: 'type_chaufferie', label: 'Type de production',
-        type: 'select', options: ['Chauffage seul','Chauffage + ECS','ECS seule'],
+        id: 'type_chaufferie', label: 'Type de production', type: 'select',
+        options: ['Chauffage + ECS','Chauffage seul','ECS seule'],
         showForTypes: ['Chaufferie','Sous-station principale','Sous-station']
       },
       { id: 'schema_principe', label: 'Schéma de principe disponible', type: 'yesno' },
@@ -33,15 +33,7 @@ const FORM_MODULES = [
       { id: 'local_hauteur',  label: 'Hauteur (m)',  type: 'number', step: '0.01' },
       { id: 'local_surface',  label: 'Surface (m²) — calculée', type: 'computed', formula: 'local_longueur * local_largeur', unit: 'm²' },
       { id: 'local_volume',   label: 'Volume (m³) — calculé',   type: 'computed', formula: 'local_longueur * local_largeur * local_hauteur', unit: 'm³' },
-      { id: 'section_vents', label: '— VENTILATIONS —', type: 'section' },
-      { id: 'vh_largeur', label: 'VH — Largeur (cm)', type: 'number' },
-      { id: 'vh_hauteur', label: 'VH — Hauteur (cm)', type: 'number' },
-      { id: 'vh_section', label: 'VH — Section (cm²) — calculée', type: 'computed', formula: 'vh_largeur * vh_hauteur', unit: 'cm²' },
-      { id: 'vh_validation', label: 'VH — Validation', type: 'computed_validation', formula: 'vh_largeur * vh_hauteur', rule: 'ventilation_vh' },
-      { id: 'vb_largeur', label: 'VB — Largeur (cm)', type: 'number' },
-      { id: 'vb_hauteur', label: 'VB — Hauteur (cm)', type: 'number' },
-      { id: 'vb_section', label: 'VB — Section (cm²) — calculée', type: 'computed', formula: 'vb_largeur * vb_hauteur', unit: 'cm²' },
-      { id: 'vb_validation', label: 'VB — Validation', type: 'computed_validation', formula: 'vb_largeur * vb_hauteur', rule: 'ventilation_vb' },
+
       { id: 'section_acces', label: '— ACCÈS —', type: 'section' },
       { id: 'porte_largeur', label: 'Porte — Largeur (cm)', type: 'number' },
       { id: 'porte_hauteur', label: 'Porte — Hauteur (cm)', type: 'number' },
@@ -60,8 +52,16 @@ const FORM_MODULES = [
     color: '#f97316',
     hasEquipment: true,
     fields: [
+      { id: 'prim_puissance', label: 'Puissance installée', type: 'select',
+        options: ['< 70 kW','≥ 70 kW et < 400 kW','≥ 400 kW et < 1 MW','≥ 1 MW'],
+        showForTypes: ['Chaufferie','Sous-station principale','Sous-station']
+      },
       { id: 'prim_pompes',       label: 'Pompes primaires présentes',       type: 'yesno' },
       { id: 'prim_filtre_tamis', label: 'Filtre à tamis retour général',    type: 'yesno' },
+      { id: 'prim_soupape', label: 'Soupape de sécurité', type: 'yesno3' },
+      { id: 'prim_nb_soupapes', label: 'Nb soupapes', type: 'number' },
+      { id: 'prim_tarage_soupapes', label: 'Tarage soupapes (bar)', type: 'number', step: '0.1' },
+      { id: 'prim_vase_exp', label: 'Vase expansion chauffage', type: 'yesno3' },
       { id: 'section_pression',  label: '— PRESSION —', type: 'section' },
       { id: 'prim_pression',     label: 'Pression circuit (bar)',           type: 'number', step: '0.1' },
       // Gaz pressure shown if energie=GAZ
@@ -93,10 +93,6 @@ const FORM_MODULES = [
       },
       { id: 'section_mat_chauf', label: '— MATÉRIELS —', type: 'section' },
       { id: '__equipment_chauf', label: 'Équipements du circuit', type: 'equipment_inline' },
-      { id: 'chauf_pompes', label: 'Pompes chauffage', type: 'text' },
-      { id: 'chauf_vanne_3v', label: 'Vanne 3 voies', type: 'text' },
-      { id: 'chauf_pression_amont', label: 'Pression amont (bar)', type: 'number', step: '0.1' },
-      { id: 'chauf_pression_aval', label: 'Pression aval (bar)', type: 'number', step: '0.1' },
       { id: 'section_mes_chauf', label: '— MESURES —', type: 'section' },
       { id: '__mesures_chauf', label: 'Points de mesure', type: 'mesures_chauf',
         pointOptions: ['Température extérieure régulateur','Température extérieure réelle','Températures réseau','Pression pompe','Débit','Autre'] },
@@ -113,6 +109,19 @@ const FORM_MODULES = [
       { id: 'reg_eco_jour',          label: 'Mode ECO jour (°C)',  type: 'number', step: '0.5' },
       { id: 'reg_eco_nuit',          label: 'Mode ECO nuit (°C)',  type: 'number', step: '0.5' },
       { id: 'reg_consigne_depart',   label: 'Consigne départ résultante (°C)', type: 'number', step: '0.1' },
+      { id: 'section_trait_chauf', label: '— TRAITEMENT EAU CHAUFFAGE —', type: 'section' },
+      { id: 'trait_desemboueur', label: 'Desemboueur', type: 'yesno3',
+        conditional: { showWhen: { field: 'trait_desemboueur', value: 'oui' }, fields: [
+          { id: 'trait_desemboueur_fiche', label: 'Fiche de suivi desemboueur', type: 'yesno3' },
+        ]}
+      },
+      { id: 'trait_adoucisseur_chauf', label: 'Adoucisseur chauffage', type: 'yesno3',
+        conditional: { showWhen: { field: 'trait_adoucisseur_chauf', value: 'oui' }, fields: [
+          { id: 'trait_sel_chauf', label: 'Stock de sel present', type: 'yesno3' },
+        ]}
+      },
+      { id: 'trait_pot_intro', label: "Pot d'introduction", type: 'yesno3' },
+      { id: 'trait_anti_tartre', label: 'Traitement anti-tartre', type: 'yesno3' },
       { id: 'section_mat_dist', label: "— DISTRIBUTION —", type: 'section' },
       { id: 'chauf_type_dist', label: 'Type de distribution', type: 'select', options: ['Bi-tube','Monotube','Plancher chauffant','Mixte','Inconnu','Autre'] },
       { id: 'chauf_materiau', label: 'Matériau distribution', type: 'select',
@@ -123,10 +132,7 @@ const FORM_MODULES = [
       { id: 'chauf_robinets_tb', label: 'Robinets thermostatiques', type: 'yesno3' },
       { id: 'chauf_bypass', label: 'Vanne by-pass / BTE', type: 'yesno3' },
       { id: 'chauf_separateur', label: 'Separateur hydraulique', type: 'yesno3' },
-      { id: 'chauf_vase_exp', label: 'Vase expansion', type: 'yesno3' },
-      { id: 'chauf_soupape', label: 'Soupape securite', type: 'yesno3' },
-      { id: 'chauf_nb_soupapes', label: 'Nb soupapes', type: 'number' },
-      { id: 'chauf_tarage_soupapes', label: 'Tarage soupapes (bar)', type: 'number', step: '0.1' },
+
       { id: 'chauf_notes', label: 'Observations', type: 'textarea' },
     ]
   },
@@ -155,6 +161,17 @@ const FORM_MODULES = [
       { id: 'ecs_temp_depart',   label: 'Température départ (°C)',  type: 'number', step: '0.1' },
       { id: 'ecs_temp_retour',   label: 'Température retour (°C)',  type: 'number', step: '0.1' },
       { id: 'ecs_temp_stockage', label: 'Température stockage ballon (°C)', type: 'number', step: '0.1', hideIfProd: 'Échangeur instantané' },
+      { id: 'section_trait_ecs', label: '— TRAITEMENT EAU ECS —', type: 'section' },
+      { id: 'trait_adoucisseur_ecs', label: 'Adoucisseur ECS', type: 'yesno3',
+        conditional: { showWhen: { field: 'trait_adoucisseur_ecs', value: 'oui' }, fields: [
+          { id: 'trait_sel_ecs', label: 'Stock de sel present', type: 'yesno3' },
+        ]}
+      },
+      { id: 'trait_filmogene', label: 'Traitement filmogene', type: 'yesno3' },
+      { id: 'manchette_ef', label: 'Manchette temoin EF', type: 'yesno3' },
+      { id: 'manchette_depart', label: 'Manchette temoin depart', type: 'yesno3' },
+      { id: 'manchette_boucle', label: 'Manchette temoin boucle', type: 'yesno3' },
+      { id: 'section_dist_ecs', label: '— DISTRIBUTION ECS —', type: 'section' },
       {
         id: 'ecs_materiau', label: 'Matériau distribution', type: 'select',
         options: ['Cuivre','PVC-C','Inox','Multicouche','Acier galvanisé','Inconnu','Autre']
@@ -165,6 +182,7 @@ const FORM_MODULES = [
       { id: 'ecs_vase_exp', label: 'Vase expansion ECS', type: 'yesno3' },
       { id: 'ecs_soupape', label: 'Soupape securite ECS', type: 'yesno3' },
       { id: 'ecs_tarage_soupape', label: 'Tarage soupape (bar)', type: 'number', step: '0.1' },
+
       { id: 'ecs_notes', label: 'Observations', type: 'textarea' },
     ]
   },
@@ -201,6 +219,19 @@ const FORM_MODULES = [
           { id: 'conf_disconnecteur',  label: 'Disconnecteur',                   type: 'yesno3' },
           { id: 'conf_robinet_puisage',label: "Robinet de puisage",              type: 'yesno3' },
           { id: 'conf_tuyau_arrosage', label: "Tuyau d'arrosage",               type: 'yesno3' },
+          { id: 'section_ventil', label: '— VENTILATIONS —', type: '__sec' },
+          { id: 'conf_vh_present', label: 'Ventilation haute (VH) présente', type: 'yesno3',
+            conditional: { showWhen: { field: 'conf_vh_present', value: 'oui' }, fields: [
+              { id: 'vh_largeur', label: 'VH — Largeur (cm)', type: 'number' },
+              { id: 'vh_hauteur', label: 'VH — Hauteur (cm)', type: 'number' },
+            ]}
+          },
+          { id: 'conf_vb_present', label: 'Ventilation basse (VB) présente', type: 'yesno3',
+            conditional: { showWhen: { field: 'conf_vb_present', value: 'oui' }, fields: [
+              { id: 'vb_largeur', label: 'VB — Largeur (cm)', type: 'number' },
+              { id: 'vb_hauteur', label: 'VB — Hauteur (cm)', type: 'number' },
+            ]}
+          },
         ]
       },
       {
@@ -271,37 +302,7 @@ const FORM_MODULES = [
           { id: 'fumee_plaque',           label: 'Plaque signalétique fumisterie', type: 'yesno3' },
         ]
       },
-      {
-        title: 'TRAITEMENT EAU — CHAUFFAGE',
-        fields: [
-          { id: 'trait_desemboueur', label: 'Présence désemboueur', type: 'yesno3',
-            conditional: { showWhen: { field: 'trait_desemboueur', value: 'oui' }, fields: [
-              { id: 'trait_desemboueur_fiche', label: 'Fiche de suivi du désemboueur', type: 'yesno3' },
-            ]}
-          },
-          { id: 'trait_adoucisseur_chauf', label: 'Présence adoucisseur chauffage', type: 'yesno3',
-            conditional: { showWhen: { field: 'trait_adoucisseur_chauf', value: 'oui' }, fields: [
-              { id: 'trait_sel_chauf', label: 'Stock de sel présent', type: 'yesno3' },
-            ]}
-          },
-          { id: 'trait_pot_intro',  label: "Pot d'introduction",  type: 'yesno3' },
-          { id: 'trait_anti_tartre',label: 'Traitement anti-tartre', type: 'yesno3' },
-        ]
-      },
-      {
-        title: 'TRAITEMENT EAU — ECS',
-        fields: [
-          { id: 'trait_adoucisseur_ecs', label: 'Adoucisseur ECS', type: 'yesno3',
-            conditional: { showWhen: { field: 'trait_adoucisseur_ecs', value: 'oui' }, fields: [
-              { id: 'trait_sel_ecs', label: 'Stock de sel présent', type: 'yesno3' },
-            ]}
-          },
-          { id: 'trait_filmogene',    label: 'Traitement filmogène',  type: 'yesno3' },
-          { id: 'manchette_ef',       label: 'Manchette témoin EF',   type: 'yesno3' },
-          { id: 'manchette_depart',   label: 'Manchette témoin départ', type: 'yesno3' },
-          { id: 'manchette_boucle',   label: 'Manchette témoin boucle', type: 'yesno3' },
-        ]
-      },
+
     ],
     notes_field: { id: 'conf_notes', label: 'Observations générales', type: 'textarea' }
   },
