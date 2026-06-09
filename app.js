@@ -77,7 +77,14 @@ function showView(name){
   const title=document.getElementById('header-title');
   const sub=document.getElementById('header-sub');
   if(name==='dashboard'){title.innerHTML='ADIA<span>TOOL</span>';sub.textContent='Tableau de bord';}
-  else if(name==='users'){title.innerHTML='ADIA<span>TOOL</span>';sub.textContent='Choisir un utilisateur';backBtn.classList.remove('hidden');document.getElementById('btn-settings-nav').style.display='none';renderUsersView();}
+  else if(name==='users'){
+    title.innerHTML='ADIA<span>TOOL</span>';
+    sub.textContent='Choisir un utilisateur';
+    // Show back button only if we have a previous context (not cold start)
+    if(currentUser){backBtn.classList.remove('hidden');}
+    document.getElementById('btn-settings-nav').style.display='none';
+    renderUsersView();
+  }
   else if(name==='site'){
     const s=sites.find(x=>x.id===currentSiteId);
     title.innerHTML=esc(s?.name||'Site');sub.textContent=[s?.codeAffaire,s?.city].filter(Boolean).join(' · ');
@@ -130,6 +137,7 @@ function setupEvents(){
     else if(av?.id==='view-site')showView('dashboard');
     else if(av?.id==='view-settings')showView('dashboard');
     else if(av?.id==='view-users')showView('dashboard');
+    else showView('dashboard');
     stopCamera();
   });
   document.getElementById('btn-settings-nav').addEventListener('click',()=>showView('settings'));
@@ -178,66 +186,85 @@ function renderUsersView(){
   const container=document.getElementById('view-users');
   if(!container)return;
   container.innerHTML='';
-  const panel=document.createElement('div');panel.className='users-panel';
-  const title=document.createElement('h2');
-  title.style.cssText='font-family:var(--font-display);font-size:20px;font-weight:700;padding:0 0 16px;text-align:center';
-  title.textContent='Qui êtes-vous ?';
-  panel.appendChild(title);
-  if(!users.length){
-    const msg=document.createElement('p');msg.style.cssText='color:var(--text-secondary);font-size:13px;text-align:center';
-    msg.textContent='Aucun utilisateur — créez-en un dans Paramètres.';panel.appendChild(msg);
-    const btn=document.createElement('button');btn.className='btn-secondary';btn.style.marginTop='12px';
-    btn.textContent='⚙️ Aller aux paramètres';btn.addEventListener('click',()=>showView('settings'));
-    panel.appendChild(btn);
-  }else{
-    users.forEach(u=>{
-      const card=document.createElement('div');card.className='user-card';
-      card.style.cssText='display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all .2s;margin-bottom:8px';
-      if(currentUser?.id===u.id){card.style.borderColor='var(--accent)';card.style.background='rgba(30,127,212,.1)';}
-      const avatar=document.createElement('div');avatar.className='user-avatar';avatar.style.cssText='width:44px;height:44px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:18px;font-weight:700;color:white;flex-shrink:0';
-      avatar.textContent=((u.prenom||u.nom||'?')[0]).toUpperCase();
-      const info=document.createElement('div');info.style.flex='1';
-      info.innerHTML=`<div style="font-family:var(--font-display);font-size:16px;font-weight:600">${esc(u.prenom||'')} ${esc(u.nom||'')}</div><div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(u.email||'')}</div>`;
-      const btn=document.createElement('button');
-      if(currentUser?.id===u.id){
-        btn.style.cssText='background:none;border:none;color:var(--accent);font-size:22px;cursor:default';btn.textContent='✓';
-      }else{
-        btn.className='btn-primary btn-sm';btn.style.cssText='width:auto;padding:8px 16px;flex-shrink:0';btn.textContent='Choisir';
-        btn.addEventListener('click',async(e)=>{
-          e.stopPropagation();
-          currentUser=u;
-          await dbPut('config',{key:'currentUser',value:u});
-          showView('dashboard');
-          showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
-        });
-      }
-      card.appendChild(avatar);card.appendChild(info);card.appendChild(btn);
-      // Also allow clicking the whole card
-      card.addEventListener('click',async()=>{
-        if(currentUser?.id===u.id)return;
-        currentUser=u;await dbPut('config',{key:'currentUser',value:u});
-        showView('dashboard');showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
-      });
-      panel.appendChild(card);
-    });
-  }
-  container.appendChild(panel);
-}
+  container.style.cssText='overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:20px;gap:12px';
 
-// ── DASHBOARD ────────────────────────────────────────────────────
-function renderSites(search=''){
-  const list=document.getElementById('sites-list');
-  const f=sites.filter(s=>!search||(s.name||'').toLowerCase().includes(search.toLowerCase())||(s.city||'').toLowerCase().includes(search.toLowerCase())||(s.codeAffaire||'').toLowerCase().includes(search.toLowerCase()));
-  if(!f.length){list.innerHTML=`<div class="empty-state"><div class="empty-icon">🏢</div><p>${sites.length===0?'Aucun site.<br>Appuyez sur + pour commencer.':'Aucun résultat.'}</p></div>`;return;}
-  list.innerHTML='';
-  f.sort((a,b)=>a.name.localeCompare(b.name)).forEach(site=>{
-    const sm=missions.filter(m=>m.siteId===site.id);
-    const card=document.createElement('div');card.className='site-card';
-    card.innerHTML=`<div class="card-header"><div><div class="card-title">${esc(site.name)}</div><div class="card-sub">${[site.codeAffaire,site.address,site.city].filter(Boolean).join(' · ')}</div></div><div class="card-actions"><button class="card-btn" data-id="${site.id}" data-action="edit">✏️</button><button class="card-btn" data-id="${site.id}" data-action="delete">🗑️</button></div></div><div class="card-stats"><span class="cstat"><span>${sm.length}</span> mission${sm.length!==1?'s':''}</span>${site.energie?`<span class="cstat">${esc(site.energie)}</span>`:''}</div>`;
-    card.addEventListener('click',e=>{const btn=e.target.closest('[data-action]');if(!btn){currentSiteId=site.id;showView('site');return;}if(btn.dataset.action==='edit')openSiteModal(site.id);else deleteSite(site.id);});
+  // Title
+  const title=document.createElement('h2');
+  title.style.cssText='font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--text-primary);margin:16px 0 8px;text-align:center;width:100%';
+  title.textContent='Qui êtes-vous ?';
+  container.appendChild(title);
+
+  if(!users.length){
+    const msg=document.createElement('p');
+    msg.style.cssText='color:var(--text-secondary);font-size:14px;text-align:center;margin-bottom:16px';
+    msg.textContent='Aucun utilisateur — créez-en un dans Paramètres.';
+    container.appendChild(msg);
+    const btn=document.createElement('button');
+    btn.className='btn-secondary';btn.style.cssText='max-width:300px;width:100%';
+    btn.textContent='⚙️ Aller aux paramètres';
+    btn.addEventListener('click',()=>showView('settings'));
+    container.appendChild(btn);
+    return;
+  }
+
+  const list=document.createElement('div');
+  list.style.cssText='display:flex;flex-direction:column;gap:10px;width:100%;max-width:480px';
+
+  users.forEach(u=>{
+    const isActive=currentUser?.id===u.id;
+    const card=document.createElement('div');
+    card.style.cssText=`display:flex;align-items:center;gap:14px;padding:16px;background:var(--bg-card);border:2px solid ${isActive?'var(--accent)':'var(--border)'};border-radius:var(--radius);cursor:pointer;transition:all .2s`;
+
+    const avatar=document.createElement('div');
+    avatar.style.cssText='width:46px;height:46px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:20px;font-weight:700;color:white;flex-shrink:0';
+    avatar.textContent=((u.prenom||u.nom||'?')[0]).toUpperCase();
+
+    const info=document.createElement('div');
+    info.style.flex='1';
+    info.innerHTML=`<div style="font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--text-primary)">${esc(u.prenom||'')} ${esc(u.nom||'')}</div>${u.email?`<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(u.email)}</div>`:''}`;
+
+    if(isActive){
+      const badge=document.createElement('div');
+      badge.style.cssText='color:var(--accent);font-size:22px;flex-shrink:0';
+      badge.textContent='✓';
+      card.appendChild(avatar);card.appendChild(info);card.appendChild(badge);
+    }else{
+      const btn=document.createElement('button');
+      btn.className='btn-primary';
+      btn.style.cssText='width:auto;padding:10px 20px;font-size:14px;flex-shrink:0';
+      btn.textContent='Choisir';
+      btn.addEventListener('click',async e=>{
+        e.stopPropagation();
+        currentUser=u;
+        await dbPut('config',{key:'currentUser',value:u});
+        showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
+        showView('dashboard');
+      });
+      card.appendChild(avatar);card.appendChild(info);card.appendChild(btn);
+    }
+
+    card.addEventListener('click',async()=>{
+      if(isActive){showView('dashboard');return;}
+      currentUser=u;
+      await dbPut('config',{key:'currentUser',value:u});
+      showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
+      showView('dashboard');
+    });
+
     list.appendChild(card);
   });
+
+  container.appendChild(list);
+
+  // Skip button to go to dashboard without selecting
+  const skip=document.createElement('button');
+  skip.className='btn-secondary';skip.style.cssText='max-width:480px;width:100%;margin-top:4px';
+  skip.textContent='Continuer sans sélectionner';
+  skip.addEventListener('click',()=>showView('dashboard'));
+  container.appendChild(skip);
 }
+
+
 function renderAllMissions(){
   const search=document.getElementById('mission-search-all').value.toLowerCase();
   const sf=document.getElementById('mission-filter-status').value;
