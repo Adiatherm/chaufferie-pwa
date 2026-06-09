@@ -58,9 +58,13 @@ async function init(){
   await sleep(500);
   document.getElementById('splash').style.display='none';
   document.getElementById('app').classList.remove('hidden');
-  // If no user selected, prompt selection first
-  if(!currentUser&&users.length>0)showView('users');
-  else showView('dashboard');
+  showView('dashboard');
+  // Show user selection overlay if no user selected and users exist
+  if(!currentUser&&users.length>0){
+    setTimeout(()=>renderUsersView(),100);
+  }else if(currentUser){
+    updateHeaderUser();
+  }
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 function updateNet(){document.getElementById('net-dot').classList.toggle('offline',!navigator.onLine);}
@@ -78,12 +82,9 @@ function showView(name){
   const sub=document.getElementById('header-sub');
   if(name==='dashboard'){title.innerHTML='ADIA<span>TOOL</span>';sub.textContent='Tableau de bord';}
   else if(name==='users'){
-    title.innerHTML='ADIA<span>TOOL</span>';
-    sub.textContent='Choisir un utilisateur';
-    // Show back button only if we have a previous context (not cold start)
-    if(currentUser){backBtn.classList.remove('hidden');}
-    document.getElementById('btn-settings-nav').style.display='none';
+    // User selection is now a modal overlay, not a full view
     renderUsersView();
+    return; // Don't switch views
   }
   else if(name==='site'){
     const s=sites.find(x=>x.id===currentSiteId);
@@ -183,131 +184,83 @@ function setupEvents(){
 
 // ── USERS ─────────────────────────────────────────────────────────
 function renderUsersView(){
-  const container=document.getElementById('view-users');
-  if(!container)return;
-  container.innerHTML='';
-  container.style.cssText='overflow-y:auto;display:flex;flex-direction:column;align-items:center;padding:20px;gap:12px';
+  // Remove any existing user modal
+  const existing=document.getElementById('user-select-modal');
+  if(existing)existing.remove();
 
-  // Title
+  const modal=document.createElement('div');
+  modal.id='user-select-modal';
+  modal.style.cssText='position:fixed;inset:0;z-index:500;background:rgba(8,15,26,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px';
+
+  const box=document.createElement('div');
+  box.style.cssText='background:var(--bg-dark);border:1px solid var(--border);border-radius:16px;padding:28px 24px;width:100%;max-width:460px;display:flex;flex-direction:column;gap:12px;max-height:80vh;overflow-y:auto';
+
   const title=document.createElement('h2');
-  title.style.cssText='font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--text-primary);margin:16px 0 8px;text-align:center;width:100%';
+  title.style.cssText='font-family:var(--font-display);font-size:22px;font-weight:700;text-align:center;margin-bottom:4px';
   title.textContent='Qui êtes-vous ?';
-  container.appendChild(title);
+  box.appendChild(title);
 
   if(!users.length){
     const msg=document.createElement('p');
-    msg.style.cssText='color:var(--text-secondary);font-size:14px;text-align:center;margin-bottom:16px';
-    msg.textContent='Aucun utilisateur — créez-en un dans Paramètres.';
-    container.appendChild(msg);
-    const btn=document.createElement('button');
-    btn.className='btn-secondary';btn.style.cssText='max-width:300px;width:100%';
-    btn.textContent='⚙️ Aller aux paramètres';
-    btn.addEventListener('click',()=>showView('settings'));
-    container.appendChild(btn);
-    return;
+    msg.style.cssText='color:var(--text-secondary);font-size:13px;text-align:center;margin:8px 0';
+    msg.textContent='Aucun utilisateur — créez-en un dans ⚙️ Paramètres.';
+    box.appendChild(msg);
   }
 
-  const list=document.createElement('div');
-  list.style.cssText='display:flex;flex-direction:column;gap:10px;width:100%;max-width:480px';
+  // Deduplicate users by id just in case
+  const uniqueUsers=[...new Map(users.map(u=>[u.id,u])).values()];
 
-  users.forEach(u=>{
-    const isActive=currentUser?.id===u.id;
+  uniqueUsers.forEach(u=>{
     const card=document.createElement('div');
-    card.style.cssText=`display:flex;align-items:center;gap:14px;padding:16px;background:var(--bg-card);border:2px solid ${isActive?'var(--accent)':'var(--border)'};border-radius:var(--radius);cursor:pointer;transition:all .2s`;
+    card.style.cssText=`display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--bg-card);border:2px solid ${currentUser?.id===u.id?'var(--accent)':'var(--border)'};border-radius:12px;cursor:pointer;transition:border-color .2s`;
 
     const avatar=document.createElement('div');
-    avatar.style.cssText='width:46px;height:46px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:20px;font-weight:700;color:white;flex-shrink:0';
+    avatar.style.cssText='width:44px;height:44px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:18px;font-weight:700;color:white;flex-shrink:0';
     avatar.textContent=((u.prenom||u.nom||'?')[0]).toUpperCase();
 
-    const info=document.createElement('div');
-    info.style.flex='1';
-    info.innerHTML=`<div style="font-family:var(--font-display);font-size:16px;font-weight:600;color:var(--text-primary)">${esc(u.prenom||'')} ${esc(u.nom||'')}</div>${u.email?`<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-top:2px">${esc(u.email)}</div>`:''}`;
+    const info=document.createElement('div');info.style.flex='1';
+    info.innerHTML=`<div style="font-family:var(--font-display);font-size:15px;font-weight:600">${esc(u.prenom||'')} ${esc(u.nom||'')}</div>${u.email?`<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);margin-top:1px">${esc(u.email)}</div>`:''}`;
 
-    if(isActive){
-      const badge=document.createElement('div');
-      badge.style.cssText='color:var(--accent);font-size:22px;flex-shrink:0';
-      badge.textContent='✓';
-      card.appendChild(avatar);card.appendChild(info);card.appendChild(badge);
-    }else{
-      const btn=document.createElement('button');
-      btn.className='btn-primary';
-      btn.style.cssText='width:auto;padding:10px 20px;font-size:14px;flex-shrink:0';
-      btn.textContent='Choisir';
-      btn.addEventListener('click',async e=>{
-        e.stopPropagation();
-        currentUser=u;
-        await dbPut('config',{key:'currentUser',value:u});
-        showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
-        showView('dashboard');
-      });
-      card.appendChild(avatar);card.appendChild(info);card.appendChild(btn);
-    }
-
-    card.addEventListener('click',async()=>{
-      if(isActive){showView('dashboard');return;}
+    const selectUser=async()=>{
       currentUser=u;
       await dbPut('config',{key:'currentUser',value:u});
+      modal.remove();
+      updateHeaderUser();
       showToast(`Connecté : ${u.prenom} ${u.nom}`,'success');
-      showView('dashboard');
-    });
+    };
 
-    list.appendChild(card);
+    if(currentUser?.id===u.id){
+      const badge=document.createElement('div');
+      badge.style.cssText='color:var(--accent);font-size:22px';badge.textContent='✓';
+      card.appendChild(avatar);card.appendChild(info);card.appendChild(badge);
+      card.addEventListener('click',()=>modal.remove());
+    }else{
+      const btn=document.createElement('button');
+      btn.className='btn-primary';btn.style.cssText='width:auto;padding:9px 18px;font-size:13px;flex-shrink:0';
+      btn.textContent='Choisir';
+      btn.addEventListener('click',async e=>{e.stopPropagation();await selectUser();});
+      card.appendChild(avatar);card.appendChild(info);card.appendChild(btn);
+      card.addEventListener('click',selectUser);
+    }
+    box.appendChild(card);
   });
 
-  container.appendChild(list);
-
-  // Skip button to go to dashboard without selecting
   const skip=document.createElement('button');
-  skip.className='btn-secondary';skip.style.cssText='max-width:480px;width:100%;margin-top:4px';
+  skip.className='btn-secondary';skip.style.cssText='margin-top:4px;width:100%';
   skip.textContent='Continuer sans sélectionner';
-  skip.addEventListener('click',()=>showView('dashboard'));
-  container.appendChild(skip);
+  skip.addEventListener('click',()=>modal.remove());
+  box.appendChild(skip);
+
+  modal.appendChild(box);
+  document.body.appendChild(modal);
 }
 
-
-function renderSites(search=''){
-  const list=document.getElementById('sites-list');
-  if(!list)return;
-  const q=(search||'').toLowerCase();
-  const filtered=sites.filter(s=>
-    !q||(s.name||'').toLowerCase().includes(q)||
-    (s.city||'').toLowerCase().includes(q)||
-    (s.codeAffaire||'').toLowerCase().includes(q)
-  ).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
-
-  if(!filtered.length){
-    list.innerHTML=`<div class="empty-state"><div class="empty-icon">🏢</div><p>${
-      !sites.length?'Aucun site.<br>Appuyez sur + pour commencer.':'Aucun résultat.'
-    }</p></div>`;
-    return;
-  }
-  list.innerHTML='';
-  filtered.forEach(site=>{
-    const sm=missions.filter(m=>m.siteId===site.id);
-    const card=document.createElement('div');card.className='site-card';
-    card.innerHTML=`
-      <div class="card-header">
-        <div>
-          <div class="card-title">${esc(site.name)}</div>
-          <div class="card-sub">${[site.codeAffaire,site.address,site.city].filter(Boolean).join(' · ')}</div>
-        </div>
-        <div class="card-actions">
-          <button class="card-btn" data-action="edit">✏️</button>
-          <button class="card-btn" data-action="del">🗑️</button>
-        </div>
-      </div>
-      <div class="card-stats">
-        <span class="cstat"><span>${sm.length}</span> mission${sm.length!==1?'s':''}</span>
-        ${site.energie?`<span class="cstat">${esc(site.energie)}</span>`:''}
-      </div>`;
-    card.querySelector('[data-action=edit]').addEventListener('click',e=>{e.stopPropagation();openSiteModal(site.id);});
-    card.querySelector('[data-action=del]').addEventListener('click',e=>{e.stopPropagation();deleteSite(site.id);});
-    card.addEventListener('click',e=>{
-      if(e.target.closest('[data-action]'))return;
-      currentSiteId=site.id;showView('site');
-    });
-    list.appendChild(card);
-  });
+function updateHeaderUser(){
+  // Show current user initials in header
+  const btn=document.getElementById('btn-settings-nav');
+  if(!btn||!currentUser)return;
+  const initials=((currentUser.prenom||'')[0]||'')+((currentUser.nom||'')[0]||'');
+  btn.innerHTML=`<div style="width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-size:11px;font-weight:700;color:white" title="${esc(currentUser.prenom+' '+currentUser.nom)}">${esc(initials.toUpperCase())}</div>`;
 }
 
 
@@ -1455,7 +1408,7 @@ async function saveEquipment(){
     await dbPut('equiplib',libEntry);
   }
   capturedImage=null;document.getElementById('modal-equipment').classList.add('hidden');
-  refreshAllEquipInline();showToast(editingEqId?'Équipement mis à jour ✓':'Équipement ajouté ✓','success');
+  refreshAllEquipInline();if(document.getElementById('mtab-synthesis')?.classList.contains('active'))renderSynthesis();showToast(editingEqId?'Équipement mis à jour ✓':'Équipement ajouté ✓','success');
 }
 async function deleteEquipment(id){if(!confirm('Supprimer ?'))return;await dbDel('equipments',id);equipments=equipments.filter(e=>e.id!==id);refreshAllEquipInline();renderSynthesis();showToast('Supprimé');}
 

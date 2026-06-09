@@ -20,11 +20,6 @@ const FORM_MODULES = [
         type: 'select', options: ['Chauffage seul','Chauffage + ECS','ECS seule'],
         showForTypes: ['Chaufferie','Sous-station principale','Sous-station']
       },
-      {
-        id: 'type_chaufferie', label: 'Type de production', type: 'select',
-        options: ['Chauffage + ECS','Chauffage seul','ECS seule'],
-        showForTypes: ['Chaufferie','Sous-station principale','Sous-station']
-      },
       { id: 'schema_principe', label: 'Schéma de principe disponible', type: 'yesno' },
       { id: 'etat_local', label: 'État du local', type: 'select', options: ['Propre','Acceptable','Passable','Nettoyage à réaliser','Sale','Très sale'] },
       { id: 'section_dims', label: '— DIMENSIONS LOCAL —', type: 'section' },
@@ -154,8 +149,6 @@ const FORM_MODULES = [
       },
       { id: 'section_mat_ecs', label: '— MATÉRIELS —', type: 'section' },
       { id: '__equipment_ecs', label: 'Équipements du circuit', type: 'equipment_inline' },
-      { id: 'ecs_pompes_boucle', label: 'Pompes de boucle', type: 'text' },
-      { id: 'ecs_vanne_3v', label: 'Vanne 3 voies ECS', type: 'text' },
       { id: 'section_mes_ecs', label: '— MESURES —', type: 'section' },
       { id: '__mesures_ecs', label: 'Points de mesure', type: 'mesures_temp', pointOptions: ['Depart ECS','Retour bouclage','Temperature ballon','Autre'] },
       { id: 'ecs_temp_depart',   label: 'Température départ (°C)',  type: 'number', step: '0.1' },

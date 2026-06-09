@@ -978,8 +978,49 @@ function renderLocauxSetup(locaux,fd){
   });
 }
 
-// Make refreshAllEquipInline use the block's _refresh method
+// Refresh all equipment inline lists
 function refreshAllEquipInline(){
-  document.querySelectorAll('.equip-inline-block').forEach(block=>{if(block._refresh)block._refresh();});
+  document.querySelectorAll('.equip-inline-block').forEach(block=>{
+    const moduleId=block.dataset.moduleId;
+    if(!moduleId)return;
+    const listDiv=block.querySelector('.equip-cards-list');
+    if(!listDiv)return;
+    const mEqs=getModuleEquipments(moduleId);
+    listDiv.innerHTML='';
+    if(!mEqs.length){
+      listDiv.innerHTML='<div style="color:var(--text-muted);font-size:12px;padding:8px 0;font-style:italic">Aucun matériel — utilisez les boutons ci-dessous</div>';
+      return;
+    }
+    mEqs.forEach(eq=>{
+      const cat=categories.find(c=>c.id===eq.category)||{name:eq.category||'Autre',color:'#6b7280'};
+      const card=document.createElement('div');
+      card.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;overflow:hidden;margin-bottom:6px';
+      card.innerHTML=`
+        <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${cat.color}"></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:6px">
+          <div style="flex:1">
+            <div style="font-family:var(--font-display);font-size:15px;font-weight:700;margin-bottom:2px">${esc(eq.name||'—')}</div>
+            ${eq.brand||eq.model?`<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${[eq.brand,eq.model,eq.year?'('+eq.year+')':''].filter(Boolean).join(' ')}</div>`:''}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
+              ${eq.serial?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">SN: ${esc(eq.serial)}</span>`:''}
+              ${eq.power?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--accent2)">${esc(eq.power)}</span>`:''}
+              ${eq.condition?`<span style="font-family:var(--font-mono);font-size:10px">${{bon:'✅ Bon',correct:'🔵 Correct',degrade:'⚠️ Dégradé',hs:'❌ HS'}[eq.condition]||eq.condition}</span>`:''}
+            </div>
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0;margin-left:8px">
+            <button class="card-btn" data-eid="${eq.id}" data-emid="${moduleId}" data-action="edit">✏️</button>
+            <button class="card-btn" data-eid="${eq.id}" data-action="del">🗑️</button>
+          </div>
+        </div>`;
+      card.querySelector('[data-action=edit]').addEventListener('click',()=>openEqModal(eq.id,moduleId));
+      card.querySelector('[data-action=del]').addEventListener('click',async()=>{
+        if(!confirm('Supprimer ?'))return;
+        await dbDel('equipments',eq.id);
+        equipments=equipments.filter(e=>e.id!==eq.id);
+        refreshAllEquipInline();renderSynthesis();
+      });
+      listDiv.appendChild(card);
+    });
+  });
 }
 
