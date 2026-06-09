@@ -265,6 +265,52 @@ function renderUsersView(){
 }
 
 
+function renderSites(search=''){
+  const list=document.getElementById('sites-list');
+  if(!list)return;
+  const q=(search||'').toLowerCase();
+  const filtered=sites.filter(s=>
+    !q||(s.name||'').toLowerCase().includes(q)||
+    (s.city||'').toLowerCase().includes(q)||
+    (s.codeAffaire||'').toLowerCase().includes(q)
+  ).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+
+  if(!filtered.length){
+    list.innerHTML=`<div class="empty-state"><div class="empty-icon">🏢</div><p>${
+      !sites.length?'Aucun site.<br>Appuyez sur + pour commencer.':'Aucun résultat.'
+    }</p></div>`;
+    return;
+  }
+  list.innerHTML='';
+  filtered.forEach(site=>{
+    const sm=missions.filter(m=>m.siteId===site.id);
+    const card=document.createElement('div');card.className='site-card';
+    card.innerHTML=`
+      <div class="card-header">
+        <div>
+          <div class="card-title">${esc(site.name)}</div>
+          <div class="card-sub">${[site.codeAffaire,site.address,site.city].filter(Boolean).join(' · ')}</div>
+        </div>
+        <div class="card-actions">
+          <button class="card-btn" data-action="edit">✏️</button>
+          <button class="card-btn" data-action="del">🗑️</button>
+        </div>
+      </div>
+      <div class="card-stats">
+        <span class="cstat"><span>${sm.length}</span> mission${sm.length!==1?'s':''}</span>
+        ${site.energie?`<span class="cstat">${esc(site.energie)}</span>`:''}
+      </div>`;
+    card.querySelector('[data-action=edit]').addEventListener('click',e=>{e.stopPropagation();openSiteModal(site.id);});
+    card.querySelector('[data-action=del]').addEventListener('click',e=>{e.stopPropagation();deleteSite(site.id);});
+    card.addEventListener('click',e=>{
+      if(e.target.closest('[data-action]'))return;
+      currentSiteId=site.id;showView('site');
+    });
+    list.appendChild(card);
+  });
+}
+
+
 function renderAllMissions(){
   const search=document.getElementById('mission-search-all').value.toLowerCase();
   const sf=document.getElementById('mission-filter-status').value;
