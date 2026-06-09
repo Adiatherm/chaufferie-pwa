@@ -52,7 +52,7 @@ async function init(){
     dbGetAll('sites'),dbGetAll('missions'),dbGetAll('equipments'),dbGetAll('formdata'),dbGetAll('users')
   ]);
   setupEvents();updateNet();
-  window.addEventListener('online',updateNet);window.addEventListener('offline',updateNet);
+  if(typeof window.addEventListener==='function'){window.addEventListener('online',updateNet);window.addEventListener('offline',updateNet);}
   await sleep(1900);
   document.getElementById('splash').classList.add('fade-out');
   await sleep(500);
@@ -264,6 +264,51 @@ function updateHeaderUser(){
 }
 
 
+function renderSites(search=''){
+  const list=document.getElementById('sites-list');
+  if(!list||typeof sites==='undefined')return;
+  const q=(search||'').toLowerCase();
+  const filtered=sites.filter(s=>
+    !q||(s.name||'').toLowerCase().includes(q)||
+    (s.city||'').toLowerCase().includes(q)||
+    (s.codeAffaire||'').toLowerCase().includes(q)
+  ).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  if(!filtered.length){
+    list.innerHTML=`<div class="empty-state"><div class="empty-icon">🏢</div><p>${
+      !sites.length?'Aucun site.<br>Appuyez sur + pour commencer.':'Aucun résultat.'
+    }</p></div>`;
+    return;
+  }
+  list.innerHTML='';
+  filtered.forEach(site=>{
+    const sm=missions.filter(m=>m.siteId===site.id);
+    const card=document.createElement('div');card.className='site-card';
+    card.innerHTML=`
+      <div class="card-header">
+        <div>
+          <div class="card-title">${esc(site.name)}</div>
+          <div class="card-sub">${[site.codeAffaire,site.address,site.city].filter(Boolean).join(' · ')}</div>
+        </div>
+        <div class="card-actions">
+          <button class="card-btn" data-action="edit">&#9999;&#65039;</button>
+          <button class="card-btn" data-action="del">&#128465;&#65039;</button>
+        </div>
+      </div>
+      <div class="card-stats">
+        <span class="cstat"><span>${sm.length}</span> mission${sm.length!==1?'s':''}</span>
+        ${site.energie?`<span class="cstat">${esc(site.energie)}</span>`:''}
+      </div>`;
+    card.querySelector('[data-action=edit]').addEventListener('click',e=>{e.stopPropagation();openSiteModal(site.id);});
+    card.querySelector('[data-action=del]').addEventListener('click',e=>{e.stopPropagation();deleteSite(site.id);});
+    card.addEventListener('click',e=>{
+      if(e.target.closest('[data-action]'))return;
+      currentSiteId=site.id;showView('site');
+    });
+    list.appendChild(card);
+  });
+}
+
+
 function renderAllMissions(){
   const search=document.getElementById('mission-search-all').value.toLowerCase();
   const sf=document.getElementById('mission-filter-status').value;
@@ -418,6 +463,7 @@ function renderSynthesis(){
 }
 function renderCatFilter(){
   const sel=document.getElementById('eq-filter-cat');if(!sel)return;
+  if(typeof FORM_MODULES==='undefined')return;
   sel.innerHTML='<option value="">Tous modules</option>';
   FORM_MODULES.filter(m=>m.hasEquipment).forEach(m=>{const o=document.createElement('option');o.value=m.id;o.textContent=m.label;sel.appendChild(o);});
 }
