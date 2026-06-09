@@ -814,7 +814,7 @@ function renderCahierBlock(mod,wrapper){
   const lk=getLocalKey();
 
   // Get energy from site for conditional obligations
-  const site=window.sites?.find(s=>s.id===window.currentSiteId)||null;
+  const site=(typeof sites!=='undefined'?sites:[]).find(s=>s.id===currentSiteId)||null;
   const energie=(site?.energie||'').toLowerCase();
   const isCombustion=energie.includes('gaz')||energie.includes('fioul');
 

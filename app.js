@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── DB ───────────────────────────────────────────────────────────
-const DB_NAME='AdiatoolDB',DB_VER=4;
+const DB_NAME='AdiatoolDB',DB_VER=5;
 let db;
 function openDB(){
   return new Promise((res,rej)=>{
