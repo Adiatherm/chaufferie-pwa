@@ -284,7 +284,7 @@ const FORM_MODULES = [
         ]
       },
       {
-        title: 'ÉNERGIE / GAZ',
+        title: 'ÉNERGIE / GAZ', showIfEnergie:['GAZ','Fioul'],
         fields: [
           { id: 'gaz_compteur',           label: 'Compteur GAZ / énergie',         type: 'yesno3' },
           { id: 'gaz_vanne_barrage',      label: 'Vanne de barrage',               type: 'yesno3' },
@@ -365,6 +365,19 @@ const FORM_MODULES = [
 ];
 
 // ── LOCAL TYPES ────────────────────────────────────────────────
+// Énergies possibles d'un local technique.
+// La valeur '' signifie « hérite de l'énergie du site ».
+const LOCAL_ENERGIES = [
+  'GAZ',
+  'Fioul',
+  'CPCU',
+  'Réseau de chaleur',
+  'Pompe à chaleur',
+  'Électrique',
+  'Réseau primaire interne',
+  'Autre',
+];
+
 const LOCAL_TYPES = [
   'Chaufferie',
   'Sous-station principale',

@@ -58,6 +58,42 @@ function getRepeatInstances(modId){
 }
 
 // ── COLLAPSE STATE ─────────────────────────────────────────────────
+// ── ÉNERGIE DU LOCAL ───────────────────────────────────────────────
+// Retourne l'énergie effective du local : la sienne si elle est renseignée,
+// sinon celle du site (héritage).
+function getSiteEnergie(){
+  return sites.find(s=>s.id===currentSiteId)?.energie||'';
+}
+function getLocalEnergie(idx,locaux){
+  const loc=(locaux||getMFD().locaux||[])[idx];
+  return (loc&&loc.energie)?loc.energie:getSiteEnergie();
+}
+
+// ── PRÉ-SÉLECTION AUTOMATIQUE DES MODULES ──────────────────────────
+// Le type de local, l'énergie et le type de production déterminent les
+// modules pertinents. L'opérateur n'a plus à cocher 8 cases : il ajuste
+// seulement à la marge.
+const MODULES_PAR_TYPE={
+  'Chaufferie':             ['generalites','primaire','chauffage','ecs','autres_materiels','conformite','compteurs','cahier'],
+  'Sous-station principale':['generalites','primaire','chauffage','ecs','autres_materiels','conformite','compteurs'],
+  'Sous-station':           ['generalites','primaire','chauffage','ecs','autres_materiels','conformite','compteurs'],
+  'Local TGBT':             ['generalites','autres_materiels'],
+  'Local surpresseur':      ['generalites','autres_materiels'],
+  'Autre':                  ['generalites','autres_materiels'],
+};
+function suggestModules(loc){
+  const base=MODULES_PAR_TYPE[loc?.type]||MODULES_PAR_TYPE['Autre'];
+  // Garde-fou : on ne propose que des identifiants qui existent reellement,
+  // pour qu'un renommage dans forms-data.js ne produise pas de module fantome.
+  const known=new Set(FORM_MODULES.map(m=>m.id));
+  const out=base.filter(id=>known.has(id));
+  if(out.length!==base.length){
+    console.warn('[ADIATOOL] suggestModules : identifiants inconnus =',
+      base.filter(id=>!known.has(id)));
+  }
+  return out;
+}
+
 function getCollapseKey(modId,instanceIdx=null){
   const lk=getLocalKey();
   return instanceIdx!==null?`${lk}_${modId}_${instanceIdx}`:`${lk}_${modId}`;
@@ -67,6 +103,17 @@ function setCollapsed(modId,collapsed,instanceIdx=null){
 }
 function isCollapsed(modId,instanceIdx=null){
   return collapseState.get(getCollapseKey(modId,instanceIdx))||false;
+}
+
+// ── VISIBILITÉ D'UNE SECTION ───────────────────────────────────────
+// Le conditionnement existait au niveau champ seulement. Une section entière
+// peut désormais être masquée : le bloc ÉNERGIE / GAZ n'a aucun sens sur un
+// local raccordé au chauffage urbain.
+function sectionVisible(sec){
+  if(!sec)return false;
+  if(sec.showForTypes&&currentLocalType&&!sec.showForTypes.includes(currentLocalType))return false;
+  if(sec.showIfEnergie&&currentEnergie&&!sec.showIfEnergie.some(e=>currentEnergie.includes(e)))return false;
+  return true;
 }
 
 // ── MAIN RENDER ────────────────────────────────────────────────────
@@ -90,7 +137,10 @@ function renderFormsZone(){
 
   const activeLocal=fd.activeLocalIdx||0;
   currentLocalType=locaux[activeLocal]?.type||'';
-  currentEnergie=sites.find(s=>s.id===currentSiteId)?.energie||'';
+  // L'énergie est portée par le LOCAL. Une chaufferie gaz peut alimenter des
+  // sous-stations sur réseau primaire : le conditionnement doit donc être local.
+  // Repli sur l'énergie du site tant que le local n'en porte pas.
+  currentEnergie=getLocalEnergie(activeLocal,locaux);
 
   // Local tabs bar
   tabsBar.innerHTML='';
@@ -122,7 +172,19 @@ function renderFormsZone(){
     btn.addEventListener('click',async()=>{
       const fdd=getMFD();if(!fdd.localModules)fdd.localModules={};
       const mods=[...(fdd.localModules[lk]||[])];
-      const idx=mods.indexOf(mod.id);if(idx>=0)mods.splice(idx,1);else mods.push(mod.id);
+      // L'opérateur touche la sélection : on cesse de la reproposer automatiquement
+      const li=fdd.activeLocalIdx||0;
+      if(fdd.locaux&&fdd.locaux[li])fdd.locaux[li].modulesTouches=true;
+      const idx=mods.indexOf(mod.id);
+      if(idx>=0){
+        mods.splice(idx,1);
+      }else{
+        mods.push(mod.id);
+        // Un module fraîchement activé s'insère REPLIÉ : l'opérateur garde
+        // la liste des modules sous les yeux pendant sa sélection.
+        setCollapsed(mod.id,true);
+        if(mod.repeatable)getRepeatInstances(mod.id).forEach((_,i)=>setCollapsed(mod.id,true,i));
+      }
       fdd.localModules[lk]=mods;await saveMFD(fdd);
       // Toggle in place without full re-render
       refreshModuleBlock(mod.id, mods.includes(mod.id));
@@ -219,7 +281,11 @@ function renderSimpleBlock(mod,wrapper){
   }
 
   // Fields
-  const allFields=mod.sections?mod.sections.flatMap(s=>[{type:'__sec',label:s.title},...s.fields]):(mod.fields||[]);
+  const allFields=mod.sections
+    ? mod.sections
+        .filter(sectionVisible)
+        .flatMap(s=>[{type:'__sec',label:s.title},...s.fields])
+    : (mod.fields||[]);
   allFields.forEach(f=>renderFieldInto(f,body,mod,null));
   if(mod.notes_field)renderFieldInto(mod.notes_field,body,mod,null);
 
@@ -460,6 +526,9 @@ function updateComputedField(field,modId,iIdx){
 
 // ── EQUIPMENT INLINE ──────────────────────────────────────────────
 const CL_EQ={bon:'✅ Bon état',correct:'🔵 Correct',degrade:'⚠️ Dégradé',hs:'❌ Hors service'};
+// Cycle de vie : un equipement n'est jamais supprime, il change de statut.
+// L'historique reste ainsi disponible pour les plans pluriannuels de travaux.
+const ST_EQ={en_service:'',depose:'📦 Déposé',remplace:'🔄 Remplacé'};
 
 function getModuleEquipments(moduleId){
   // Match by exact moduleContext OR by base moduleId if no index suffix
@@ -498,6 +567,7 @@ function buildEquipmentInline(moduleId){
               ${eq.serial?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">SN: ${esc(eq.serial)}</span>`:''}
               ${eq.power?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--accent2)">${esc(eq.power)}</span>`:''}
               ${eq.condition?`<span style="font-family:var(--font-mono);font-size:10px">${CL_EQ[eq.condition]||eq.condition}</span>`:''}
+              ${(eq.status&&eq.status!=='en_service')?`<span style="font-family:var(--font-mono);font-size:10px;opacity:.7">${ST_EQ[eq.status]||eq.status}</span>`:''}
             </div>
             ${eq.notes?`<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;font-style:italic">${esc(eq.notes.slice(0,80))}${eq.notes.length>80?'…':''}</div>`:''}
           </div>
@@ -962,10 +1032,36 @@ function renderLocauxSetup(locaux,fd){
     row.innerHTML=`<span class="local-item-num">${i+1}</span>`;
     const sel=document.createElement('select');sel.className='local-item-type';sel.style.flex='1';
     LOCAL_TYPES.forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;if(t===loc.type)o.selected=true;sel.appendChild(o);});
-    sel.addEventListener('change',async()=>{const fdd=getMFD();fdd.locaux[i].type=sel.value;await saveMFD(fdd);renderFormsZone();});
+    sel.addEventListener('change',async()=>{
+      const fdd=getMFD();
+      fdd.locaux[i].type=sel.value;
+      // Le type pilote les modules : on repropose la sélection adaptée
+      // tant que l'opérateur n'a rien coché manuellement sur ce local.
+      const lk2=`local_${i}`;
+      if(!fdd.localModules)fdd.localModules={};
+      if(!fdd.locaux[i].modulesTouches)fdd.localModules[lk2]=suggestModules(fdd.locaux[i]);
+      await saveMFD(fdd);renderFormsZone();
+    });
+
     const nomInp=document.createElement('input');nomInp.type='text';nomInp.placeholder='Nom (ex: Bât A)';nomInp.value=loc.nom||'';
     nomInp.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text-primary);font-size:12px;outline:none;flex:1;max-width:110px';
     nomInp.addEventListener('change',async()=>{const fdd=getMFD();fdd.locaux[i].nom=nomInp.value;await saveMFD(fdd);renderFormsZone();});
+
+    // ── Énergie du local (vide = héritée du site) ──
+    const enSel=document.createElement('select');enSel.className='local-item-energie';
+    enSel.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:7px 8px;color:var(--text-primary);font-size:12px;outline:none;max-width:130px';
+    const siteEn=getSiteEnergie();
+    const oHer=document.createElement('option');oHer.value='';
+    oHer.textContent=siteEn?`↳ ${siteEn} (site)`:'↳ Énergie du site';
+    enSel.appendChild(oHer);
+    LOCAL_ENERGIES.forEach(e=>{
+      const o=document.createElement('option');o.value=e;o.textContent=e;
+      if(e===loc.energie)o.selected=true;enSel.appendChild(o);
+    });
+    enSel.title="Énergie de ce local. Laisser sur « énergie du site » dans la plupart des cas.";
+    enSel.addEventListener('change',async()=>{
+      const fdd=getMFD();fdd.locaux[i].energie=enSel.value;await saveMFD(fdd);renderFormsZone();
+    });
     const del=document.createElement('button');del.className='local-item-del';del.textContent='🗑️';
     del.addEventListener('click',async()=>{
       if(!confirm('Supprimer ce local et tous ses relevés ?'))return;
@@ -974,53 +1070,17 @@ function renderLocauxSetup(locaux,fd){
       if((fdd.activeLocalIdx||0)>=fdd.locaux.length)fdd.activeLocalIdx=Math.max(0,fdd.locaux.length-1);
       await saveMFD(fdd);renderFormsZone();
     });
-    row.appendChild(sel);row.appendChild(nomInp);row.appendChild(del);container.appendChild(row);
+    row.appendChild(sel);row.appendChild(nomInp);row.appendChild(enSel);row.appendChild(del);container.appendChild(row);
   });
 }
 
 // Refresh all equipment inline lists
 function refreshAllEquipInline(){
+  // Source unique du markup : on délègue au _refresh posé par buildEquipmentInline().
+  // Ne jamais réécrire le HTML des cartes ici — cela ferait diverger l'affichage
+  // entre la construction initiale et le rafraîchissement.
   document.querySelectorAll('.equip-inline-block').forEach(block=>{
-    const moduleId=block.dataset.moduleId;
-    if(!moduleId)return;
-    const listDiv=block.querySelector('.equip-cards-list');
-    if(!listDiv)return;
-    const mEqs=getModuleEquipments(moduleId);
-    listDiv.innerHTML='';
-    if(!mEqs.length){
-      listDiv.innerHTML='<div style="color:var(--text-muted);font-size:12px;padding:8px 0;font-style:italic">Aucun matériel — utilisez les boutons ci-dessous</div>';
-      return;
-    }
-    mEqs.forEach(eq=>{
-      const cat=categories.find(c=>c.id===eq.category)||{name:eq.category||'Autre',color:'#6b7280'};
-      const card=document.createElement('div');
-      card.style.cssText='background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;overflow:hidden;margin-bottom:6px';
-      card.innerHTML=`
-        <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${cat.color}"></div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-left:6px">
-          <div style="flex:1">
-            <div style="font-family:var(--font-display);font-size:15px;font-weight:700;margin-bottom:2px">${esc(eq.name||'—')}</div>
-            ${eq.brand||eq.model?`<div style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${[eq.brand,eq.model,eq.year?'('+eq.year+')':''].filter(Boolean).join(' ')}</div>`:''}
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">
-              ${eq.serial?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted)">SN: ${esc(eq.serial)}</span>`:''}
-              ${eq.power?`<span style="font-family:var(--font-mono);font-size:10px;color:var(--accent2)">${esc(eq.power)}</span>`:''}
-              ${eq.condition?`<span style="font-family:var(--font-mono);font-size:10px">${{bon:'✅ Bon',correct:'🔵 Correct',degrade:'⚠️ Dégradé',hs:'❌ HS'}[eq.condition]||eq.condition}</span>`:''}
-            </div>
-          </div>
-          <div style="display:flex;gap:4px;flex-shrink:0;margin-left:8px">
-            <button class="card-btn" data-eid="${eq.id}" data-emid="${moduleId}" data-action="edit">✏️</button>
-            <button class="card-btn" data-eid="${eq.id}" data-action="del">🗑️</button>
-          </div>
-        </div>`;
-      card.querySelector('[data-action=edit]').addEventListener('click',()=>openEqModal(eq.id,moduleId));
-      card.querySelector('[data-action=del]').addEventListener('click',async()=>{
-        if(!confirm('Supprimer ?'))return;
-        await dbDel('equipments',eq.id);
-        equipments=equipments.filter(e=>e.id!==eq.id);
-        refreshAllEquipInline();renderSynthesis();
-      });
-      listDiv.appendChild(card);
-    });
+    if(typeof block._refresh==='function')block._refresh();
   });
 }
 

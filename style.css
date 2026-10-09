@@ -365,6 +365,7 @@ input[type=date],input[type=time]{color-scheme:dark}
 /* SYNTHESIS / EQUIPMENT INLINE */
 .equip-inline-block{background:var(--bg-elevated);border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:4px}
 .equip-inline-list{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.equip-cards-list{display:flex;flex-direction:column;gap:0;margin-bottom:8px}
 .equip-inline-item{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;cursor:pointer}
 .equip-inline-item:active{border-color:var(--accent)}
 .equip-inline-name{flex:1;font-size:13px;font-weight:500}
